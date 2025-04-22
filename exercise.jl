@@ -2,8 +2,12 @@
 pwd()
 using JuMP
 using Ipopt
+using Interpolations
+using ForwardDiff
 
-## example 
+
+
+## example for nonlinear programming with JuMP and Ipopt
 # 1. create a JuMP model that uses Ipopt as the solver
 model = Model(Ipopt.Optimizer) 
 set_optimizer_attribute(model, "tol", 1e-8)
@@ -44,16 +48,102 @@ function returning_optimizer(a, b)
     optimize!(model)
     x = value(x)
     y = value(y)
-    return (x,y) 
+    return x,y
 end
 
 returning_optimizer(1, 2)
+returning_optimizer(1, 2)[1] + returning_optimizer(1, 2)[2] 
 returning_optimizer(20, 300)
 returning_optimizer(0.5, 0.2)
+
+## example for interpolation
+x = 0:0.5:3
+y = @. sin(x)
+
+itp = interpolate( (x,), y, Gridded(Linear()))
+x_star = 0.73
+itp(0.73)
+
+## example for interpolating a 3-D function
+
+xx = 0:0.5:2
+size(xx)
+yy = 0:0.25:1
+size(yy)
+zz = 0:π/6:π/2
+size(zz)
+
+f(x,y,z) = sin(x)*cos(y) + z^2
+fvals = [sin(xi)*cos(yi) + zi^2 for zi in zz, yi in yy, xi in xx]
+
+itp_3d = interpolate((zz,yy,xx), fvals, Gridded(Linear()))
+itp_3d(1.5, 0.18, 0.73) ## the evaluating point should be in the grid of the interpolation
+itp_3d.(0:π/4:π/2, 0:0.5:1, 0:1:2)
+xn = 0:1:2
+yn = 0:0.5:1
+zn = 0:π/4:π/2
+F = [itp_3d(z, y, x) for z in zn, y in yn, x in xn]
+
+## example of optimizing interpolated function
+
+# given xx, yy, zz and fvals 
+itp_3d_Bspline = interpolate((zz,yy,xx), fvals, Gridded(Linear()))
+f_interp(z, y, x) = itp_3d_Bspline(z, y, x) # a function that evalutes at u using interpolation
+f_interp(z::T, y::T, x::T) where {T<:Real} = itp_3d_Bspline(z, y, x)
+
+
+function optimize_example()
+    model = Model(Ipopt.Optimizer)
+    set_optimizer_attribute(model, "tol", 1e-8)
+    register(model, :foo, 3, f_interp; autodiff = true)
+    (zlb, zub) = extrema(zz)
+    (ylb, yub) = extrema(yy)
+    (xlb, xub) = extrema(xx)
+    @variable(model, zlb <= z <= zub, start = 0.5)
+    @variable(model, ylb <= y <= yub, start = 0.5)
+    @variable(model, xlb <= x <= xub, start = 0.5)
+    @NLobjective(model, Min, foo(z, y, x))
+    optimize!(model)
+    return termination_status(model), objective_value(model), value.(z, y, x)
+end
+
+optimize_example()
+
+extrema(zz), extrema(yy), extrema(xx)
+##########################################################################################################
+
+function minmax_broadcast_example()
+    a = [1,2,3]
+    b = [10,20]
+    c = [1,2,3,4,5]
+    d = [1,2,3]
+    e = [1,2,3,4]
+
+    f(x,y,z,w,u) = max(min(x/y, y/z), (x+y)/z -w + u )
+    fvals = [f.(ia, ib, ic, id, ie) for ia in a, ib in b, ic in c, id in d, ie in e]
+    return fvals
+end
+
+minmax_broadcast_example()[1,1,1,1, :]
+
+x = ones(2,3,4)
+x .= x * 10
+x
+
+f_example(x,y,z) = x + y + z
+f_example.(1,1,[1,2,3])
+
+
+v = [10, 20, 30]                 # Vector
+for i in eachindex(v)
+    @show i, v[i]                # i is 1,2,3            (Int)
+end
+
 
 
 
 ##########################################################################################################
+
 using Optim
 f(x) = (1.0 - x[1])^2 + 100.0 * (x[2] - x[1]^2)^2
 
