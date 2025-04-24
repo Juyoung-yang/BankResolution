@@ -58,6 +58,8 @@ returning_optimizer(0.5, 0.2)
 
 ## example for interpolation
 x = 0:0.5:3
+x[1]
+typeof(x), size(x)
 y = @. sin(x)
 
 itp = interpolate( (x,), y, Gridded(Linear()))
@@ -139,8 +141,11 @@ for i in eachindex(v)
     @show i, v[i]                # i is 1,2,3            (Int)
 end
 
-
-
+a = 10:20
+for (iλ, λprime) in pairs(a)
+    @show iλ, λprime             # iλ is 1,2,3...10      (Int)
+end
+x =  1 < 2 ? "Fail" : "yes" 
 
 ##########################################################################################################
 

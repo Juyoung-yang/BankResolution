@@ -1,5 +1,7 @@
 pwd()
 
+
+
 using Pkg
 using LinearAlgebra
 using Statistics
@@ -77,23 +79,25 @@ struct Params{T<:Real,S<:Integer}
 end
 
 struct vFuncs{T,S} where {T<:Real,S<:Integer}
-    EVF::Array{T,3} # expected value function, [Delta* Lambda* n]
+    VF::Array{T,3} # value function, [Delta* Lambda* n]
     qBond::Array{T,5} # bank bond price schedule, [bPrime* lPrime* sPrime* Delta* Lambda]
     Rl::T # loan interest rate
     X::Array{T,4} # bank's failure decision 
 end
 
 struct vFuncsNew{T,S} where {T<:Real,S<:Integer} # storing updated outcome after VFI
-    EVF::Array{T,3} # expected value function, [Delta* Lambda* n]
+    VF::Array{T,3} # value function, [Delta* Lambda* n]
     qBond::Array{T,5} # bank bond price schedule, [bPrime* lPrime* sPrime* Delta* Lambda]
     Rl::T # loan interest rate
     X::Array{T,4} # bank's failure decision 
-    diffs1::Array{T,3} # difference between EVF EVF_new
+    diffs::Array{T,3} # difference between VF VF_new
 end
 
 struct IterObj_i{T,S} where {T<:Real,S<:Integer} # objects given state (iDelta, iLambda), objects used in VFI_i
     EV::Array{T,3} # EV[l,s,b]
+    G::Array{T,4} # G(l,s,b,n)
     solution::Array{T,1} # optimizer = [(l,s,b)]
+    solution_index::Array{T,1} # optimizer = [(il,is,ib)]
     failure::Array{T,1} # failure decision = [(fail or not fail)]
 end
 
@@ -134,12 +138,12 @@ function ModelParams_rating{T,S}(γc::T,σy::T,ρy::T,ξ::T,Rf::T,λ::T,z::T,β:
 =#
 
 function Initiate_vFunc(params::Params{T,S}) where Params{T<:Real,S<:Integer}
-    EVF = zeros(3, 3, params.n_npts); # expected value function
+    VF = zeros(3, 3, params.n_npts); # expected value function
     qBond = zeros(3, 3, params.l_npts, params.s_npts, params.b_npts); # bank bond price schedule
     Rl = 0; # loan interest rate
     X = zeros(3, 3, params.n_npts, 3); # bank's failure decision 
 
-    return vFuncs(EVF, qBond, Rl, X)
+    return vFuncs(VF, qBond, Rl, X)
 end
 
 ###################################################
@@ -180,7 +184,6 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
                 end
         end
 
-
         Update_vFuncs_Diffs(vFuncs, vFuncsNew, params, Pz_trans, diffs); # after the optimization, calculate the differene 
         maxdiffs = maximum(diffs);
 
@@ -196,71 +199,135 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
     return (vFuncs = vFuncs, Iterobj_is = Iterobj_is);  
 end
 
-## function for iterating for a given exogenous state (iDelta, iLambda) and Rl
-## regime matters here in 1) Bank's optimization and 2) qDebt calculation 
-function VFI_i(params::Params{T,S}, vFuncs, Rl::T, iterobj_i, iDelta::S, iLambda::S, regime::F) where {T<:Real, S<:Integer, F<:Bool}
+## function for value function updating for a given exogenous state (iDelta, iLambda) and Rl
+function VFI_i(params::Params{T,S}, vFuncs::vFuncs{T,S}, vFuncsNew, Rl::T, iterObj_i::IterObj_i{T,S}, iDelta::S, iLambda::S, regime::F) where {T<:Real, S<:Integer, F<:Bool}
     δ = params.deltaGrid[iDelta]; # get the state for Delta
     λ = params.lambdaGrid[iLambda]; # get the state for Lambda
 
-    # 1. construct iterobj_i.EV 
+    NAV(l::T,s::T,b::T,lambda::T)::T = Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # net asset value of the bank, lambda here is lambda prime 
+    tax(l::T,s::T,b::T,lambda::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *(δ + b)) # tax on the bank's asset value
+    n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l # next period asset conditional on bank failure 
+    n_success(l::T,s::T,b::T,lambda::T)::T = NAV(l,s,b,lambda) - tax(l,s,b,lambda) # next period asset conditional on bank success 
 
-    # 1-1. for a given (il, is, ib), construct V conditional on (delta prime, lambda prime)
-    # 1-2. multiply by transition matrix to get EV
-    # 1-3. iterate over all (il, is, ib) to get EV[L,S,B]
+    # 1) construct iterObj_i.EV[l,s,b] via gen_EV function 
+    # 1-1) for a given (il, is, ib), construct V[delta prime, lambda prime] conditional on (delta prime, lambda prime)
+    function inter_v_temp(params::Params{T,S}, vFuncs::vFuncs{T,S}, delta::T,lambda::T,n::T)::T
+        nRange = params.nGrid # ex) 0:0.5:2
+        lambdaRange = params.lambdaGrid
+        deltaRange = params.deltaGrid
+        vfVals = [vFuncs.VF[iDelta, iLambda, iN] for iN in eachindex(nRange), iLambda in eachindex(lambdaRange), iDelta in eachindex(deltaRange)] # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
 
-    NAV(l,s,b,lambda)::T = Rl*{ (1-lambda)*l + params.g*δ} + (1+params.Rf)*s - δ - b # net asset value of the bank
-    
-    
-
-    if NAV >= 0 # in case of bank success
-        tau = params.τC * max(0, ( (Rl()-1)*[(1-λprime)*lprime +params.g*delta] + params.Rf*sprime - params.Rf *(delta + bprime)))
-        nprime = NAV - tau
-    else # in case of bank failure
-        nprime = params.α * params.wr * Rl() * (1-λprime)*lprime 
-    end
-    EV()
-
-    return psi(params, div) + params.β * EV()
-    
-    # 2-1. set the optimization model given state (iDelta, iLmambda, iN)
-     function solve_bank_problem(vFuncs, iDelta::S, iLambda::S, iN::S) where {T<:Real, S<:Integer}
-            model = Model(Ipopt.Optimizer)
-            set_optimizer_attribute(model, "tol", 1e-8)
-            @variable(model, l >= 0)
-            @variable(model, s >= 0)
-            @variable(model, b >= 0)
-
-            div(l,s,b) = params.nGrid[iN] + (1-params.cL)*params.β*params.δ + vFuncs.qBond(l,s,b,iDelta,iLambda)*b - l - params.g * params.deltaGrid[iDelta] -s-params.cM*l^2 -params.cO 
-            
-            # objective function depending on regime 
-            if regime == false # ordinary regime
-                @NLobjective(model, Max, (a-x)^2 + (y-b)^2)
-            else # special regime
-                @NLobjective(model, Max, (a-x)^2 + (y-b)^2 + params.ϕ(y))
-            end
-    
-            @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta] +s - params.deltaGrid[iDelta]-b)/(params.wr*l) >= params.α) # constratint 1
-            @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta]) <= params.β*params.deltaGrid[iDelta]) # constratint 2
-            optimize!(model)
-    
-            if is_solved_and_feasible(model) == false
-                println("model is infeasible")
-                break
-            else
-                return value(l), value(s), value(b) # returning the optimal values of l, s, b
-            end
-     end
-
-    # 2-2. for each n in nGrid, find the optimal (l, s, b), store iterobj_i.solution, iterobj_i.failure, and update vFuncs.VF
-    Threads.@threads for iN in eachindex(params.nGrid) # for each n 
-        solve_bank_problem(vFuncs, iDelta, iLambda, iN); # find the solution 
-        # store the solution 
-
+        itp = interpolate((n, lambda, delta), vfVals, BSpline(Cubic(Line(OnGrid())))) # Gridded(Linear())
+        return itp
     end
 
- 
-end
- 
+    function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::vFuncs{T,S},regime::F)::Array{T,2} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
+        
+        if regime == false # ordinary regime 
+        @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
+            for (iδ, δprime) in pairs(params.deltaGrid)
+                nav = NAV(l,s,b,λprime)
+                if nav <= zero(T) # bank failure
+                    n_temp = n_failure(l,λprime) # next period asset conditional on bank failure 
+                    V_temp[iδ, iλ] = (1-params.ρ) * inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
+                else # bank success
+                    n_temp = n_success(l,s,b,λprime) # next period asset conditional on bank success 
+                    V_temp[iδ, iλ] = inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
+                end
+            end
+        end 
+
+        elseif regime == true # special regime
+            @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
+                for (iδ, δprime) in pairs(params.deltaGrid)
+                    nav = NAV(l,s,b,λprime)
+                    if nav <= zero(T) # bank failure
+                        V_temp[iδ, iλ] = zero(T) # interpolating v at (delta, lambda, n(iLambda))
+                    else # bank success
+                        n_temp = n_success(l,s,b, λprime) # next period asset conditional on bank success 
+                        V_temp[iδ, iλ] = inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
+                    end
+                end
+            end 
+        end
+
+        return V_temp # [nDelta, nLambda] object 
+    end
+
+    # 1-2) multiply by transition matrix to get EV \in R: gen_EV_temp function 
+    function gen_EV_temp(l::T,s::T,b::T, params::Params{T,S},vFuncs::vFuncs{T,S}, regime::F)::T # incorporate failure array and conditional asset array to get ex-post asset array 
+    
+        V_temp = gen_V_temp(l,s,b,params,vFuncs, regime) # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
+        EV_conditional = params.Markov_Delta[iDelta] * V_temp * params.Markov_Lambda[iLambda] # the return is a scalar 
+        return EV_conditional 
+    end
+
+    # 1-3) iterate over all (il, is, ib) to get EV[L,S,B]: gen_EV function 
+    function gen_EV(params::Params{T,S},vFuncs::vFuncs{T,S},iterObj_i::IterObj_i{T,S},regime::F)
+
+        EV = iterObj_i.EV 
+        @inbounds for (il, l) in pairs(params.lGrid)
+                    for (is, s) in pairs(params.sGrid)
+                         for (ib, b) in pairs(params.bGrid)
+                              EV[il,is,ib] = gen_EV_temp(l,s,b,params,vFuncs,regime) 
+                        end
+                     end
+                end
+        return iterObj_i
+    end
+
+    # 2) Construct iterObj_i.G[l,s,b,n] = flow utility[l,s,b,n] + β * EV[l,s,b]
+    # 3) set the optimization model given state (iDelta, iLmambda, iN)
+    # 4) store solution in iterObj_i.solution, iterObj_i.failure
+    # 5) update vFuncs.VF
+    function solve_bank_problem(vFuncs, iDelta::S, iLambda::S, iN::S) where {T<:Real, S<:Integer}
+        model = Model(Ipopt.Optimizer)
+        set_optimizer_attribute(model, "tol", 1e-8)
+        @variable(model, l >= 0)
+        @variable(model, s >= 0)
+        @variable(model, b >= 0)
+
+        div(l,s,b) = params.nGrid[iN] + (1-params.cL)*params.β*params.deltaGrid[iDelta] + vFuncs.qBond(l,s,b,iDelta,iLambda)*b - l - params.g * params.deltaGrid[iDelta] -s-params.cM*l^2 -params.cO 
+        
+        # objective function depending on regime 
+        if regime == false # ordinary regime
+            @NLobjective(model, Max, (a-x)^2 + (y-b)^2)
+        else # special regime
+            @NLobjective(model, Max, (a-x)^2 + (y-b)^2 + params.ϕ(y))
+        end
+
+        @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta] +s - params.deltaGrid[iDelta]-b)/(params.wr*l) >= params.α) # constratint 1
+        @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta]) <= params.β*params.deltaGrid[iDelta]) # constratint 2
+        optimize!(model)
+
+        if is_solved_and_feasible(model) == false
+            println("model is infeasible")
+            break
+        else
+            return value(l), value(s), value(b) # returning the optimal values of l, s, b
+        end
+    end
+
+    function update_VF_with_solution(sol, )
+
+    end
+
+    # for each n in nGrid, find the optimal (l, s, b), store iterobj_i.solution, iterobj_i.failure, and update vFuncs.VF
+    Threads.@threads for (iN, n) in pairs(params.nGrid) # for each n 
+        
+        div(l,s,b) = params.nGrid[iN] + (1-params.cL)*params.β*params.deltaGrid[iDelta] + vFuncs.qBond(l,s,b,iDelta,iLambda)*b - l - params.g * params.deltaGrid[iDelta] -s-params.cM*l^2 -params.cO 
+
+        div = n .+ (1-params.cL)*params.β*δ .+ vFuncs.qBond(:, :, :, iDelta, iLambda)*B - L .- params.g*δ .- S - params.cM*L.^2 .- params.cO # (nL, nS, nB) matrix
+        G = div .+ params.β* iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix
+
+        # G above will be feeded into solve_bank_problem for interpolating v at (l,s,b) and then solve for (l,s,b)
+        sol = solve_bank_problem(vFuncs, iDelta, iLambda, iN); # find the solution, a vector with 3 elements (l,s,b)
+        iterObj_i.solution[iN] = sol; # store the solution in iterObj_i.solution
+        iterObj_i.failure[iN] .= NAV(sol[1], sol[2], sol[3], params.lambdaGrid) .<= 0 ? 1 : 0; # store the failure decision in iterObj_i.failure
+        vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol)
+    end
+end    
+
 
 # after VFI, get policy function for (l, s, b) and bank failure
 function GetPolicyFuncs(vFuncs, params::Params{T,S}) where {T<:Real, S<:Integer}
@@ -314,15 +381,25 @@ function qBond_specialRegime(params::Params{T,S}, vFuncs::vFuncs{T,S}, Rl::T) wh
 end
 
 
-function Update_vFuncs_Diffs(vFuncs, vFuncsNew, params::Params{T,S}, Pz_trans::Array{T,2}, diffs::Array{T,1}) where {T<:Real, S<:Integer}; # after the optimization, calculate the differene
+function Update_vFuncs_Diffs(vFuncs::vFuncs{T,S}, vFuncsNew::vFuncsNew{T,S}, params::Params{T,S}, diffs::Array{T,1}) where {T<:Real, S<:Integer}; # after the optimization, calculate the differene
 
-     # 1. update vFuncsNew objests 
-     lmul!(params.β, vFuncsNew.EVF) # store β*EVF in vFuncsNew.EVF
+     # 1. calculate the difference of VF_0 and VF_1 
+     vFuncsNew.diffs = vFuncsNew.VF - vFuncs.VF; # difference between VF and VF_new
+     diffs = norm(vFuncsNew.diffs, Inf); # infinity norm of the difference of VF
 
-     # 2. calculate the difference of EVF and qBond
-     vFuncsNew.diffs = vFuncsNew.EVF - vFuncs.EVF; # difference between EVF and EVF_new
-     diffs = norm(vFuncsNew.diffs, Inf); # infinity norm of the difference of EVF
-
-     # 3. update vFuncsNew objects to vFuncs
-     vFuncs.EVF = vFuncsNew.EVF; # update EVF
+     # 2. update vFuncsNew objects to vFuncs
+     vFuncs.VF .= vFuncsNew.VF; # update EVF
 end
+
+
+###################################### OLD CODE ################
+
+ # function gen_n_temp(l::T,s::T,b::T,params::Params{T,S})::Vector{T} # incorporate failure array and conditional asset array to get ex-post asset array 
+ #   n_temp = Vector{T}(undef, length(params.lambdaGrid)) # temporary variable for the next period asset value
+ #
+ #   @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
+ #       nav = NAV(l,s,b,λprime)
+ #       n_temp[iλ] = nav < zero(T) ? n_failure(l, λprime) : n_success(l,s,b, λprime) 
+ #   end
+ #   return n_temp
+
