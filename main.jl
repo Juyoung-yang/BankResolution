@@ -217,53 +217,41 @@ function VFI_i(params::Params{T,S}, vFuncs::vFuncs{T,S}, vFuncsNew, Rl::T, iterO
         deltaRange = params.deltaGrid
         vfVals = [vFuncs.VF[iDelta, iLambda, iN] for iN in eachindex(nRange), iLambda in eachindex(lambdaRange), iDelta in eachindex(deltaRange)] # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
 
-        itp = interpolate((n, lambda, delta), vfVals, BSpline(Cubic(Line(OnGrid())))) # Gridded(Linear())
-        return itp
+        itp = interpolate((nRange, lambdaRange, deltaRange), vfVals, BSpline(Cubic(Line(OnGrid())))) # Gridded(Linear())
+        return itp(n,lambda,delta)
     end
 
     function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::vFuncs{T,S},regime::F)::Array{T,2} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
+        V_temp = Array{T}(undef, length(params.deltaGrid), length(params.lambdaGrid))  
         
-        if regime == false # ordinary regime 
         @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
             for (iδ, δprime) in pairs(params.deltaGrid)
                 nav = NAV(l,s,b,λprime)
-                if nav <= zero(T) # bank failure
-                    n_temp = n_failure(l,λprime) # next period asset conditional on bank failure 
-                    V_temp[iδ, iλ] = (1-params.ρ) * inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
-                else # bank success
-                    n_temp = n_success(l,s,b,λprime) # next period asset conditional on bank success 
-                    V_temp[iδ, iλ] = inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
+                failure = nav <= zero(T)
+
+                if failure 
+                        n_temp = n_failure(l,λprime)
+                        V_temp[iδ, iλ] = regime ? zero(T) : (1 - params.ρ) * inter_v_temp(params, vFuncs, δprime, λprime, n_temp)
+                else
+                        n_temp = n_success(l,s,b,λprime)
+                        V_temp[iδ, iλ] = inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
                 end
             end
-        end 
-
-        elseif regime == true # special regime
-            @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
-                for (iδ, δprime) in pairs(params.deltaGrid)
-                    nav = NAV(l,s,b,λprime)
-                    if nav <= zero(T) # bank failure
-                        V_temp[iδ, iλ] = zero(T) # interpolating v at (delta, lambda, n(iLambda))
-                    else # bank success
-                        n_temp = n_success(l,s,b, λprime) # next period asset conditional on bank success 
-                        V_temp[iδ, iλ] = inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
-                    end
-                end
-            end 
-        end
+            end
 
         return V_temp # [nDelta, nLambda] object 
     end
 
     # 1-2) multiply by transition matrix to get EV \in R: gen_EV_temp function 
-    function gen_EV_temp(l::T,s::T,b::T, params::Params{T,S},vFuncs::vFuncs{T,S}, regime::F)::T # incorporate failure array and conditional asset array to get ex-post asset array 
+    function gen_EV_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::vFuncs{T,S},regime::F)::T # incorporate failure array and conditional asset array to get ex-post asset array 
     
         V_temp = gen_V_temp(l,s,b,params,vFuncs, regime) # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
-        EV_conditional = params.Markov_Delta[iDelta] * V_temp * params.Markov_Lambda[iLambda] # the return is a scalar 
+        EV_conditional = dot(params.Markov_Delta[iDelta, :], V_temp * params.Markov_Lambda[:, iLambda]) # the return is a scalar 
         return EV_conditional 
     end
 
     # 1-3) iterate over all (il, is, ib) to get EV[L,S,B]: gen_EV function 
-    function gen_EV(params::Params{T,S},vFuncs::vFuncs{T,S},iterObj_i::IterObj_i{T,S},regime::F)
+    function gen_EV!(params::Params{T,S},vFuncs::vFuncs{T,S},iterObj_i::IterObj_i{T,S},regime::F)
 
         EV = iterObj_i.EV 
         @inbounds for (il, l) in pairs(params.lGrid)
@@ -283,18 +271,16 @@ function VFI_i(params::Params{T,S}, vFuncs::vFuncs{T,S}, vFuncsNew, Rl::T, iterO
     function solve_bank_problem(vFuncs, iDelta::S, iLambda::S, iN::S) where {T<:Real, S<:Integer}
         model = Model(Ipopt.Optimizer)
         set_optimizer_attribute(model, "tol", 1e-8)
-        @variable(model, l >= 0)
-        @variable(model, s >= 0)
-        @variable(model, b >= 0)
+        l_min, l_max = first(params.lGrid), last(params.lGrid)
+        s_min, s_max = first(params.sGrid), last(params.sGrid)
+        b_min, b_max = first(params.bGrid), last(params.bGrid)
+        @variable(model, l_min <= l <= l_max)
+        @variable(model, s_min <= s <= s_max)
+        @variable(model, b_min <= b <= b_max)
 
-        div(l,s,b) = params.nGrid[iN] + (1-params.cL)*params.β*params.deltaGrid[iDelta] + vFuncs.qBond(l,s,b,iDelta,iLambda)*b - l - params.g * params.deltaGrid[iDelta] -s-params.cM*l^2 -params.cO 
-        
-        # objective function depending on regime 
-        if regime == false # ordinary regime
-            @NLobjective(model, Max, (a-x)^2 + (y-b)^2)
-        else # special regime
-            @NLobjective(model, Max, (a-x)^2 + (y-b)^2 + params.ϕ(y))
-        end
+  #       div(l,s,b) = params.nGrid[iN] + (1-params.cL)*params.β*params.deltaGrid[iDelta] + vFuncs.qBond(l,s,b,iDelta,iLambda)*b - l - params.g * params.deltaGrid[iDelta] -s-params.cM*l^2 -params.cO 
+
+        @NLobjective(model, Max, itp_G) # ** interpolated G as a function of (l,s,b), ordering of arguments?? 
 
         @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta] +s - params.deltaGrid[iDelta]-b)/(params.wr*l) >= params.α) # constratint 1
         @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta]) <= params.β*params.deltaGrid[iDelta]) # constratint 2
@@ -308,23 +294,26 @@ function VFI_i(params::Params{T,S}, vFuncs::vFuncs{T,S}, vFuncsNew, Rl::T, iterO
         end
     end
 
-    function update_VF_with_solution(sol, )
-
+    function update_VF_with_solution(sol,params::Params{T,S},vFuncs::vFuncs{T,S},regime)::T
+        l,s,b = sol[1], sol[2], sol[3]
+        ev = gen_EV_temp(l,s,b,params,vFuncs,regime) 
+        div_val = div(l,s,b)
+        return div_val + params.β* ev
     end
 
     # for each n in nGrid, find the optimal (l, s, b), store iterobj_i.solution, iterobj_i.failure, and update vFuncs.VF
     Threads.@threads for (iN, n) in pairs(params.nGrid) # for each n 
         
         div(l,s,b) = params.nGrid[iN] + (1-params.cL)*params.β*params.deltaGrid[iDelta] + vFuncs.qBond(l,s,b,iDelta,iLambda)*b - l - params.g * params.deltaGrid[iDelta] -s-params.cM*l^2 -params.cO 
-
         div = n .+ (1-params.cL)*params.β*δ .+ vFuncs.qBond(:, :, :, iDelta, iLambda)*B - L .- params.g*δ .- S - params.cM*L.^2 .- params.cO # (nL, nS, nB) matrix
+        gen_EV!(params,vFuncs,iterObj_i,regime)
         G = div .+ params.β* iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix
 
         # G above will be feeded into solve_bank_problem for interpolating v at (l,s,b) and then solve for (l,s,b)
         sol = solve_bank_problem(vFuncs, iDelta, iLambda, iN); # find the solution, a vector with 3 elements (l,s,b)
-        iterObj_i.solution[iN] = sol; # store the solution in iterObj_i.solution
+        iterObj_i.solution[iN] .= sol; # store the solution in iterObj_i.solution
         iterObj_i.failure[iN] .= NAV(sol[1], sol[2], sol[3], params.lambdaGrid) .<= 0 ? 1 : 0; # store the failure decision in iterObj_i.failure
-        vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol)
+        vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime)
     end
 end    
 
