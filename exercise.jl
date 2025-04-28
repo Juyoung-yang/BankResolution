@@ -5,6 +5,16 @@ using Ipopt
 using Interpolations
 using ForwardDiff
 
+bgrid_start = 0.0
+bgrid_stop = 1.0
+bgrid_npts=5
+typeof(range(bgrid_start,stop=bgrid_stop,length=bgrid_npts))
+AA = [1, 1.2, 30]
+A = (1, 1.2, 20)
+typeof(A)
+AA[1] = 1.2
+AA
+
 
 
 ## example for nonlinear programming with JuMP and Ipopt
@@ -86,8 +96,22 @@ yn = 0:0.5:1
 zn = 0:π/4:π/2
 F = [itp_3d(z, y, x) for z in zn, y in yn, x in xn]
 
-## example of optimizing interpolated function
+## multidemensional uniformly spaced grid BSpline interpolation
+A_x1 = 1:.1:10
+A_x2 = 1:.5:20
+f(x1, x2) = log(x1+x2)
+A = [f(x1,x2) for x1 in A_x1, x2 in A_x2]
+itp = interpolate(A, BSpline(Cubic(Line(OnGrid()))))
+sitp = Interpolations.scale(itp, A_x1, A_x2)
+sitp(5., 10.) # exactly log(5 + 10)
+log(5+10)
+sitp(5.6, 7.1) # approximately log(5.6 + 7.1)
+log(5.6 + 7.1) # exactly log(5.6 + 7.1)
 
+eps()
+
+
+## example of optimizing interpolated function
 # given xx, yy, zz and fvals 
 itp_3d_Bspline = interpolate((zz,yy,xx), fvals, Gridded(Linear()))
 f_interp(z, y, x) = itp_3d_Bspline(z, y, x) # a function that evalutes at u using interpolation
