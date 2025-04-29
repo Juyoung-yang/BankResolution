@@ -108,7 +108,7 @@ psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.sigma  - params.dBar^
 
 function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,α1::T,α2::T,α3::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,H::Array{T,2},Γ::Array{T,2},λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
     
-    deltaGrid = (δL,δM,δH) # Define a Tuple, immutable 
+    deltaGrid = [δL,δM,δH] # Define a Tuple, immutable 
     lambdaGrid = [λL,λM,λH] # regular array, mutable
     nGrid = range(n_start,stop=n_stop,length=n_npts)
 
@@ -120,15 +120,47 @@ function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dB
     return pam
 end
     
-Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,α1::T,α2::T,α3::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,H::Array{T,2},Γ::Array{T,2},λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer} = Initiate_Params{T,S}(qd, β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,Γ,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+# Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,α1::T,α2::T,α3::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,H::Array{T,2},Γ::Array{T,2},λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer} = Initiate_Params(qd, β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,Γ,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
 
 function Initiate_vFunc(params::Params{T,S}) where {T<:Real,S<:Integer}
-    VF = zeros(3, 3, params.n_npts); # expected value function
-    qBond = zeros(params.l_npts, params.s_npts, params.b_npts, 3, 3); # bank bond price schedule
+    VF = zeros(3, 3, length(params.nGrid)); # expected value function
+    qBond = zeros(length(params.lGrid), length(params.nGrid), length(params.bGrid), 3, 3); # bank bond price schedule
     Rl = 0; # loan interest rate
-    X = zeros(3, 3, params.n_npts, 3); # bank's failure decision 
+    X = zeros(3, 3, length(params.nGrid), 3); # bank's failure decision 
 
-    return vFuncs(VF, qBond, Rl, X)
+    return VFuncs{T,S}(VF, qBond, Rl, X)
+end
+
+function Initiate_vFuncNew(params::Params{T,S}) where {T<:Real,S<:Integer}
+    VF = zeros(3, 3, length(params.nGrid)); # expected value function
+    qBond = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid), 3, 3); # bank bond price schedule
+    Rl = 0; # loan interest rate
+    X = zeros(3, 3, length(params.nGrid), 3); # bank's failure decision 
+    diffs = zeros(3, 3, length(params.nGrid)); # difference between VF and VF_new
+
+    return VFuncsNew{T,S}(VF, qBond, Rl, X, diffs)
+end
+
+function Initiate_IterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
+    EV = zeros(3, 3, length(params.nGrid)); # expected value function
+    G = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid), length(params.nGrid)); # bank bond price schedule
+    solution = zeros(T, length(params.nGrid))
+    solution_index = solution_index = zeros(T, length(params.nGrid))
+    failure = zeros(T, length(params.nGrid))
+
+    return IterObj_i{T,S}(EV, G, solution, solution_index, failure)
+end
+
+function Initiate_MatrixIterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
+    IterObj_is = Matrix{IterObj_i{T,S}}(undef, length(params.deltaGrid), length(params.lambdaGrid));
+
+    for iDelta in 1:length(params.deltaGrid)
+        for iLambda in 1:length(params.lambdaGrid)
+        IterObj_is[iDelta, iLambda] = Initiate_IterObj_i(params);
+        end
+    end
+
+    return IterObj_is; # return a vector {IterObj_iy[iy]} s.t. a vector of iy-contingent struct IterObj_iy
 end
 
 ###################################################
@@ -142,10 +174,8 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
 
     # 1. initiate value functions 
     vFuncs = Initiate_vFunc(params);
-    vFuncsNew = Initiate_vFuncsNew(params); 
-    Iterobj_is;
-
-    Pz_trans 
+    vFuncsNew = Initiate_vFuncNew(params); 
+    Iterobj_is = Initiate_MatrixIterObj_i(params); 
 
     # 1-2. set the qBond schedule based on regime
     if regime == false # ordinary regime
@@ -154,8 +184,8 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
         qBond_specialRegime(params,vFuncs,Rl) # set qBond to be 1 for all states 
     end
     
-    # 2. set numbers for iteration and set the iteration
-    iter, maxdiffs, diffs = 1, one(T), zeros(S);
+    ## 2. set numbers for iteration and set the iteration  
+    iter, maxdiffs, diffs = 1, one(T), zeros(T);
 
     # 3. start the iteration
     while iter <= maxiter && maxdiffs > tol
@@ -163,9 +193,11 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
         # 3-1. set the value function for the next iteration
 
         # 3-2. The main iteration loop 
-        Threads.@threads for iDelta in eachindex(params.deltaGrid) # 3: number of states for Delta
-                 Threads.@threads for iLambda in eachindex(params.lambdaGrid)  # 3: number of states for Lambda
-                    VFI_i(params, vFuncs, Rl, Iterobj_is[iDelta, iLmabda], iDelta, iLambda, regime); # VFI for a given exogenous state (iDelta, iLambda)
+        Threads.@threads for iDelta in 1:length(params.deltaGrid) # 3: number of states for Delta
+            println(iDelta)
+                 Threads.@threads for iLambda in 1:length(params.lambdaGrid)  # 3: number of states for Lambda
+                    println(iLambda)
+                    VFI_i(params, vFuncs, vFuncsNew, Rl, Iterobj_is[iDelta, iLambda], iDelta, iLambda, regime); # VFI for a given exogenous state (iDelta, iLambda)
                 end
         end
 
@@ -197,13 +229,14 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
     # 1) construct iterObj_i.EV[l,s,b] via gen_EV function 
     # 1-1) for a given (il, is, ib), construct V[delta prime, lambda prime] conditional on (delta prime, lambda prime)
     function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T
-        nRange = params.nGrid # ex) 0:0.5:2
+        nRange = range(params.nGrid[1], stop = params.nGrid[end], length = length(params.nGrid)) # ex) 0:0.5:2
         lambdaRange = params.lambdaGrid
         deltaRange = params.deltaGrid
         vfVals = [vFuncs.VF[iDelta, iLambda, iN] for iN in eachindex(nRange), iLambda in eachindex(lambdaRange), iDelta in eachindex(deltaRange)] # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
 
-        itp = interpolate((nRange, lambdaRange, deltaRange), vfVals, BSpline(Cubic(Line(OnGrid())))) # Gridded(Linear())
-        return itp
+        itp = interpolate((nRange, lambdaRange, deltaRange), vfVals, Gridded(Linear())) # , BSpline(Cubic(Line(OnGrid())))
+        itp_ext = extrapolate(itp, Line())
+        return itp_ext(n, lambda, delta)
     end
 
     function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::Array{T,2} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
@@ -231,7 +264,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
     function gen_EV_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::T # incorporate failure array and conditional asset array to get ex-post asset array 
     
         V_temp = gen_V_temp(l,s,b,params,vFuncs, regime) # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
-        EV_conditional = dot(params.Markov_Delta[iDelta, :], V_temp * params.Markov_Lambda[:, iLambda]) # the return is a scalar 
+        EV_conditional = dot(params.H[iDelta, :], V_temp * params.Γ[:, iLambda]) # the return is a scalar 
         return EV_conditional 
     end
 
@@ -291,12 +324,21 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
     end
 
     # for each n in nGrid, find the optimal (l, s, b), store iterobj_i.solution, iterobj_i.failure, and update vFuncs.VF
-    Threads.@threads for (iN, n) in pairs(params.nGrid) # for each n 
+    for (iN, n) in pairs(params.nGrid) # for each n / Threads.@threads 
+        println(iN), println(n)
+
+        L = reshape(params.lGrid, :, 1, 1)              # nL × 1 × 1
+        SS = reshape(params.sGrid, 1, :, 1)              # 1  × nS × 1
+        B = reshape(params.bGrid, 1, 1, :)              # 1  × 1  × nB
+        QB = @view vFuncs.qBond[:, :, :, iDelta, iLambda]  # nL × nS × nB
+        div = n .+ (1 - params.cL) * params.β * δ .+ QB .* B .- L .- params.g * δ .- SS .- params.cM .* L.^2 .- params.cO
+        @show size(div)
         
-        div(l,s,b) = params.nGrid[iN] + (1-params.cL)*params.β*params.deltaGrid[iDelta] + vFuncs.qBond(l,s,b,iDelta,iLambda)*b - l - params.g * params.deltaGrid[iDelta] -s-params.cM*l^2 -params.cO 
-        div = n .+ (1-params.cL)*params.β*δ .+ vFuncs.qBond(:, :, :, iDelta, iLambda)*B - L .- params.g*δ .- S - params.cM*L.^2 .- params.cO # (nL, nS, nB) matrix
+        # div(l,s,b) = n + (1-params.cL)*params.β*δ + vFuncs.qBond[l,s,b,iDelta,iLambda]*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
+        # div = n .+ (1-params.cL)*params.β*δ .+ vFuncs.qBond[:, :, :, iDelta, iLambda]*b - L .- params.g*δ .- S - params.cM*L.^2 .- params.cO # (nL, nS, nB) matrix
         gen_EV!(params,vFuncs,iterObj_i,regime)
-        G = div .+ params.β* iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix
+        @show size(iterObj_i.EV)
+        G = div .+ params.β * iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix
 
         # G above will be feeded into solve_bank_problem for interpolating v at (l,s,b) and then solve for (l,s,b)
         sol = solve_bank_problem(vFuncs, iN, G); # find the solution, a vector with 3 elements (l,s,b)
@@ -370,14 +412,4 @@ function Update_vFuncs_Diffs(vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, par
 end
 
 
-###################################### OLD CODE ################
-
- # function gen_n_temp(l::T,s::T,b::T,params::Params{T,S})::Vector{T} # incorporate failure array and conditional asset array to get ex-post asset array 
- #   n_temp = Vector{T}(undef, length(params.lambdaGrid)) # temporary variable for the next period asset value
- #
- #   @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
- #       nav = NAV(l,s,b,λprime)
- #       n_temp[iλ] = nav < zero(T) ? n_failure(l, λprime) : n_success(l,s,b, λprime) 
- #   end
- #   return n_temp
-
+###################################### OLD CODE #############

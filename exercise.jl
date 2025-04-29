@@ -15,8 +15,12 @@ typeof(A)
 AA[1] = 1.2
 AA
 
+for i in eachindex(0:0.1:1)
+    println(i)
+end
 
 
+typeof(zeros(3,3,3))
 ## example for nonlinear programming with JuMP and Ipopt
 # 1. create a JuMP model that uses Ipopt as the solver
 model = Model(Ipopt.Optimizer) 
