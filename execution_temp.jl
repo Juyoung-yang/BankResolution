@@ -120,10 +120,10 @@ optimize!(model)
 
 
 
-# stat = termination_status(model)
+stat = termination_status(model)
 
-# if stat == MathOptInterface.OPTIMAL || stat == MathOptInterface.LOCALLY_SOLVED
-#    return [value(l), value(s), value(b)]
-# else
-#    error("Optimization did not converge: status = $stat")
-# end
+if stat == MathOptInterface.OPTIMAL || stat == MathOptInterface.LOCALLY_SOLVED
+    return [value(l), value(s), value(b)]
+else
+   error("Optimization did not converge: status = $stat")
+end
