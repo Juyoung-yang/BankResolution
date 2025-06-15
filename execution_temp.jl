@@ -1,6 +1,6 @@
 
 include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\parameters.jl")
-include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\main.jl")
+# include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\main.jl")
 
 
 function Initiate_vFunc(params::Params{T,S}) where {T<:Real,S<:Integer}
