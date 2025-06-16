@@ -239,3 +239,15 @@ function example_clnlbeam()
 end
 
 example_clnlbeam()
+
+
+x = 1.0
+x = (1>2)
+x = zeros(2)
+x[1] = (1<2)
+x
+x .<= 0 ? 1 : 0
+
+x .<= 0
+
+NAV.([sol[1]], [sol[2]], [sol[3]], params.lambdaGrid) .<= 0 ? 1 : 0

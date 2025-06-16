@@ -98,9 +98,9 @@ end
 struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), objects used in VFI_i
     EV::Array{T,3} # EV[l,s,b]
     G::Array{T,4} # G(l,s,b,n)
-    solution::Array{T,1} # optimizer = [(l,s,b)]
-    solution_index::Array{T,1} # optimizer = [(il,is,ib)]
-    failure::Array{T,1} # failure decision = [(fail or not fail)]
+    solution::Array{Array{T,1},1} # optimizer = [(l,s,b)]
+    solution_index::Array{Array{T,1},1} # optimizer = [(il,is,ib) for each n] 
+    failure::Array{Array{T,1},1} # failure decision = [(fail or not fail vector for each lambda prime) for each n]
 end
 
 # flow utility of banks
@@ -144,9 +144,16 @@ end
 function Initiate_IterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
     EV = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid)); # expected value function conditional on a choice of (l,s,b)
     G = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid), length(params.nGrid)); # bank bond price schedule
-    solution = zeros(T, length(params.nGrid))
-    solution_index = zeros(T, length(params.nGrid))
-    failure = zeros(T, length(params.nGrid))
+
+    nN = length(params.nGrid)
+    solution        = Vector{Vector{T}}(undef, nN)
+    solution_index  = Vector{Vector{T}}(undef, nN)
+    failure = Vector{Vector{T}}(undef, nN)
+    for i in 1:nN
+        solution[i] = zeros(T, 3)
+        solution_index[i] = zeros(T, 3)
+        failure[i] = zeros(T, 3)
+    end
 
     return IterObj_i{T,S}(EV, G, solution, solution_index, failure)
 end
@@ -354,7 +361,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
         # G above will be feeded into solve_bank_problem for interpolating v at (l,s,b) and then solve for (l,s,b)
         sol = solve_bank_problem(params, vFuncs, iDelta, iLambda, iN, G); # find the solution, a vector with 3 elements (l,s,b)
         iterObj_i.solution[iN] .= sol; # store the solution in iterObj_i.solution
-        iterObj_i.failure[iN] .= NAV(sol[1], sol[2], sol[3], params.lambdaGrid) .<= 0 ? 1 : 0; # store the failure decision in iterObj_i.failure
+        iterObj_i.failure[iN] = [NAV(sol[1], sol[2], sol[3], lamPrime) < 0 for lamPrime in params.lambdaGrid] # if true, bank fails 
         vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime,n)
     end
 end     
