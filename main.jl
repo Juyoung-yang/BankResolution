@@ -145,7 +145,7 @@ function Initiate_IterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
     EV = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid)); # expected value function conditional on a choice of (l,s,b)
     G = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid), length(params.nGrid)); # bank bond price schedule
     solution = zeros(T, length(params.nGrid))
-    solution_index = solution_index = zeros(T, length(params.nGrid))
+    solution_index = zeros(T, length(params.nGrid))
     failure = zeros(T, length(params.nGrid))
 
     return IterObj_i{T,S}(EV, G, solution, solution_index, failure)
@@ -225,6 +225,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
     tax(l::T,s::T,b::T,lambda::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *(δ + b)) # tax on the bank's asset value
     n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l # next period asset conditional on bank failure 
     n_success(l::T,s::T,b::T,lambda::T)::T = NAV(l,s,b,lambda) - tax(l,s,b,lambda) # next period asset conditional on bank success 
+    div_func(l::T,s::T,b::T,n::T)::T = n + (1-params.cL)*params.β*δ + vFuncs.qBond[l,s,b,iDelta,iLambda]*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
 
     # 1) construct iterObj_i.EV[l,s,b] via gen_EV function 
     # 1-1) for a given (il, is, ib), construct V[delta prime, lambda prime] conditional on (delta prime, lambda prime)
@@ -326,10 +327,10 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
         end
     end
 
-    function update_VF_with_solution(sol,params::Params{T,S},vFuncs::VFuncs{T,S},regime)::T
+    function update_VF_with_solution(sol,params::Params{T,S},vFuncs::VFuncs{T,S},regime,n)::T
         l,s,b = sol[1], sol[2], sol[3]
         ev = gen_EV_temp(l,s,b,params,vFuncs,regime) 
-        div_val = div(l,s,b)
+        div_val = div_func(l,s,b,n)
         return div_val + params.β* ev
     end
 
@@ -354,7 +355,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
         sol = solve_bank_problem(params, vFuncs, iDelta, iLambda, iN, G); # find the solution, a vector with 3 elements (l,s,b)
         iterObj_i.solution[iN] .= sol; # store the solution in iterObj_i.solution
         iterObj_i.failure[iN] .= NAV(sol[1], sol[2], sol[3], params.lambdaGrid) .<= 0 ? 1 : 0; # store the failure decision in iterObj_i.failure
-        vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime)
+        vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime,n)
     end
 end     
 
