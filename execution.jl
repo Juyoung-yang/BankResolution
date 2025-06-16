@@ -9,7 +9,7 @@ params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL
 Rl = 1.03;
 regime = false
 VFI(params, Rl, regime, 10, 0.001)
-
+@show params.lGrid
 
 
 params.nGrid

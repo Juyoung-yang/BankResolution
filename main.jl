@@ -14,7 +14,7 @@ using Random, Statistics
 using Interpolations
 using Distributions
 using MathOptInterface
-Pkg.add("MathOptInterface")
+
 
 
 struct Params{T<:Real,S<:Integer}
@@ -104,7 +104,7 @@ struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), ob
 end
 
 # flow utility of banks
-psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.sigma  - params.dBar^params.sigma : 1 - e^(-d)
+psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)
 
 function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,α1::T,α2::T,α3::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,H::Array{T,2},Γ::Array{T,2},λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
     
@@ -142,7 +142,7 @@ function Initiate_vFuncNew(params::Params{T,S}) where {T<:Real,S<:Integer}
 end
 
 function Initiate_IterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
-    EV = zeros(3, 3, length(params.nGrid)); # expected value function
+    EV = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid)); # expected value function conditional on a choice of (l,s,b)
     G = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid), length(params.nGrid)); # bank bond price schedule
     solution = zeros(T, length(params.nGrid))
     solution_index = solution_index = zeros(T, length(params.nGrid))
@@ -289,26 +289,36 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
     function solve_bank_problem(params::Params{T,S},vFuncs::VFuncs{T,S},iDelta::S,iLambda::S,iN::S,G::Array{T,3}) where {T<:Real, S<:Integer}
         # construct objective function int_G: interpolated function[l,s,b] using G as inputs
         G_itp = interpolate(G, BSpline(Quadratic(Line(OnGrid())))) 
-        G_itp = Interpolations.scale(G_itp, params.lGrid, params.sGrid, params.bGrid)
-        G_interp(l,s,b) = G_itp(l,s,b)
+        lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid))
+        sRange = range(first(params.sGrid), last(params.sGrid), length(params.sGrid))
+        bRange = range(first(params.bGrid), last(params.bGrid), length(params.bGrid))
+        G_itp = Interpolations.scale(G_itp, lRange, sRange, bRange)
+        G_itp_ext = extrapolate(G_itp, Line())     # enables linear extrapolation
+        G_interp(l, s, b) = G_itp_ext(l, s, b)
 
         model = Model(Ipopt.Optimizer)
         set_optimizer_attribute(model, "tol", 1e-8)
+        set_optimizer_attribute(model, "max_iter", 25000)
+        set_optimizer_attribute(model, "print_level", 5)
         JuMP.register(model, :G_interp, 3, G_interp; autodiff = true)
-        l_min, l_max = first(params.lGrid) + eps(), last(params.lGrid)
+        l_min, l_max = (last(params.lGrid)+first(params.lGrid))/2, last(params.lGrid)
+        # @show l_min, l_max
         s_min, s_max = first(params.sGrid), last(params.sGrid)
         b_min, b_max = first(params.bGrid), last(params.bGrid)
-        @variable(model, l_min <= l <= l_max)
-        @variable(model, s_min <= s <= s_max)
-        @variable(model, b_min <= b <= b_max)
+        l_start = l_max
+        s_start = (s_max+s_min)/2
+        b_start = (b_max+b_min)/2
+        @variable(model, l_min <= l <= l_max, start = l_start)
+        @variable(model, s_min <= s <= s_max, start = s_start)
+        @variable(model, b_min <= b <= b_max, start = b_start)
 
         @NLobjective(model, Max, G_interp(l,s,b)) # maximizing interpolated G(l,s,b)
-        @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta] +s - params.deltaGrid[iDelta]-b)/(params.wr*l) >= params.α) # constratint 1
-        @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta]) <= params.β*params.deltaGrid[iDelta]) # constratint 2
+        @constraint(model, (1-params.α*params.wr)*l + s - b >= (1-params.g)*params.deltaGrid[iDelta])# constratint 1
+        @constraint(model, l <= (params.β - params.g)*params.deltaGrid[iDelta]) # constratint 2
 
         optimize!(model)
-
-        stat = termination_status(model)
+        @show is_solved_and_feasible(model)
+        @show stat = termination_status(model)
         if stat == MathOptInterface.OPTIMAL || stat == MathOptInterface.LOCALLY_SOLVED
             return [value(l), value(s), value(b)]
         else
@@ -327,21 +337,21 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
     for (iN, n) in pairs(params.nGrid) # for each n / Threads.@threads 
         println(iN), println(n)
 
-        L = reshape(params.lGrid, :, 1, 1)              # nL × 1 × 1
-        SS = reshape(params.sGrid, 1, :, 1)              # 1  × nS × 1
-        B = reshape(params.bGrid, 1, 1, :)              # 1  × 1  × nB
+        L = reshape(params.lGrid, :, 1, 1)    # nL × 1 × 1       
+        SS = reshape(params.sGrid, 1, :, 1)   # 1  × nS × 1
+        B = reshape(params.bGrid, 1, 1, :)    # 1  × 1  × nB
         QB = @view vFuncs.qBond[:, :, :, iDelta, iLambda]  # nL × nS × nB
-        div = n .+ (1 - params.cL) * params.β * δ .+ QB .* B .- L .- params.g * δ .- SS .- params.cM .* L.^2 .- params.cO
-        @show size(div)
+        divv = n .+ (1 - params.cL) * params.β * δ .+ QB .* B .- L .- params.g * δ .- SS .- params.cM .* L.^2 .- params.cO
         
         # div(l,s,b) = n + (1-params.cL)*params.β*δ + vFuncs.qBond[l,s,b,iDelta,iLambda]*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
         # div = n .+ (1-params.cL)*params.β*δ .+ vFuncs.qBond[:, :, :, iDelta, iLambda]*b - L .- params.g*δ .- S - params.cM*L.^2 .- params.cO # (nL, nS, nB) matrix
         gen_EV!(params,vFuncs,iterObj_i,regime)
-        @show size(iterObj_i.EV)
-        G = div .+ params.β * iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix
+        G = psi.([params], divv) .+ params.β * iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix with fixed n 
+
+        #### psi ####
 
         # G above will be feeded into solve_bank_problem for interpolating v at (l,s,b) and then solve for (l,s,b)
-        sol = solve_bank_problem(vFuncs, iN, G); # find the solution, a vector with 3 elements (l,s,b)
+        sol = solve_bank_problem(params, vFuncs, iDelta, iLambda, iN, G); # find the solution, a vector with 3 elements (l,s,b)
         iterObj_i.solution[iN] .= sol; # store the solution in iterObj_i.solution
         iterObj_i.failure[iN] .= NAV(sol[1], sol[2], sol[3], params.lambdaGrid) .<= 0 ? 1 : 0; # store the failure decision in iterObj_i.failure
         vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime)

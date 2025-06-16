@@ -1,7 +1,102 @@
+using JuMP
+using Ipopt
+using Interpolations
+using MathOptInterface
 
 include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\parameters.jl")
 # include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\main.jl")
 
+struct Params{T<:Real,S<:Integer}
+    qd::T
+    β::T
+    Rf::T
+    wr::T
+    α::T
+    ρ::T
+    g::T
+    ξ::T
+    cF::T
+    dBar::T
+    σ::T
+    τC::T
+    z::T
+    α1::T
+    α2::T
+    α3::T
+    δL::T
+    δM::T
+    δH::T
+    cM::T
+    cO::T
+    cL::T
+
+    H  # transition matrix
+    Γ  # transition matrix
+
+    λL::T
+    λM::T
+    λH::T
+    γ::T
+    ϕ::T
+
+    deltaGrid::Array{T,1}
+    lambdaGrid::Array{T,1}
+    nGrid::Array{T,1}
+    lGrid::Array{T,1}
+    sGrid::Array{T,1}   
+    bGrid::Array{T,1}
+    #---------------------------#
+    # v = zeros(3,3,n_npts);
+    # pol_l = zeros(3,3,n_npts);
+    # pol_s = zeros(3,3,n_npts);
+    # pol_b = zeros(3,3,n_npts);
+
+
+    #---------------------------#
+   # nstd::T
+   # ygrid_npts::S
+   # inflateEndPoints::Bool
+   # bgrid_npts::S
+   # bgrid_start::T
+   # bgrid_stop::T
+    
+   # pay::T
+   # ygrid_nodef::Array{T,1}
+   # ygrid_def::Array{T,1}
+   # bgrid::StepRangeLen{T,Base.TwicePrecision{T},Base.TwicePrecision{T}}
+   # Pz::Array{T,2}
+   # Ycons::Array{T,2}
+   # DebtIncrease::Array{T,2}
+end
+
+struct VFuncs{T<:Real,S<:Integer}
+    VF::Array{T,3} # value function, [Delta* Lambda* n]
+    qBond::Array{T,5} # bank bond price schedule, [bPrime* lPrime* sPrime* Delta* Lambda]
+    Rl::T # loan interest rate
+    X::Array{T,4} # bank's failure decision 
+end
+
+struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), objects used in VFI_i
+    EV::Array{T,3} # EV[l,s,b]
+    G::Array{T,4} # G(l,s,b,n)
+    solution::Array{T,1} # optimizer = [(l,s,b)]
+    solution_index::Array{T,1} # optimizer = [(il,is,ib)]
+    failure::Array{T,1} # failure decision = [(fail or not fail)]
+end
+
+function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,α1::T,α2::T,α3::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,H::Array{T,2},Γ::Array{T,2},λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
+    
+    deltaGrid = [δL,δM,δH] # Define a Tuple, immutable 
+    lambdaGrid = [λL,λM,λH] # regular array, mutable
+    nGrid = range(n_start,stop=n_stop,length=n_npts)
+
+    lGrid = range(l_start,stop=l_stop,length=l_npts)
+    sGrid = range(s_start,stop=s_stop,length=s_npts)
+    bGrid = range(b_start,stop=b_stop,length=b_npts)
+
+    pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,Γ,λL,λM,λH,γ,ϕ,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
+    return pam
+end
 
 function Initiate_vFunc(params::Params{T,S}) where {T<:Real,S<:Integer}
     VF = ones(3, 3, length(params.nGrid)); # expected value function
@@ -78,7 +173,6 @@ function gen_EV!(params::Params{T,S},vFuncs::VFuncs{T,S},iterObj_i::IterObj_i{T,
         return iterObj_i
 end
 
-
 function NAV(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
     return Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # net asset value of the bank, lambda here is lambda prime 
 end
@@ -94,6 +188,8 @@ end
 function n_success(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
     return NAV(l,s,b,lambda) - tax(l,s,b,lambda) # next period asset conditional on bank success 
 end
+
+psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)
 
 function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::Array{T,2}  where {T<:Real, S<:Integer, F<:Bool} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
         V_temp = Array{T}(undef, length(params.deltaGrid), length(params.lambdaGrid))  
@@ -118,7 +214,7 @@ function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regim
         return V_temp # [nDelta, nLambda] object 
 end
 
-function solve_bank_problem(params::Params{T,S},vFuncs::VFuncs{T,S},iDelta::S,iLambda::S,iN::S,G::Array{T,3}) where {T<:Real, S<:Integer}
+function solve_bank_problem2(params::Params{T,S},vFuncs::VFuncs{T,S},iDelta::S,iLambda::S,iN::S,G::Array{T,3}) where {T<:Real, S<:Integer}
         # construct objective function int_G: interpolated function[l,s,b] using G as inputs
         G_itp = interpolate(G, BSpline(Quadratic(Line(OnGrid())))) 
         lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid))
@@ -129,31 +225,35 @@ function solve_bank_problem(params::Params{T,S},vFuncs::VFuncs{T,S},iDelta::S,iL
         G_interp(l, s, b) = G_itp_ext(l, s, b)
 
         model = Model(Ipopt.Optimizer)
-        set_optimizer_attribute(model, "tol", 1e-2)
-        set_optimizer_attribute(model, "max_iter", 10)
+        set_optimizer_attribute(model, "tol", 1e-8)
+        set_optimizer_attribute(model, "max_iter", 25000)
+        set_optimizer_attribute(model, "print_level", 5)
         JuMP.register(model, :G_interp, 3, G_interp; autodiff = true)
-        l_min, l_max = first(params.lGrid), last(params.lGrid)
+        l_min, l_max = (last(params.lGrid)+first(params.lGrid))/2, last(params.lGrid)
+        @show l_min, l_max
         s_min, s_max = first(params.sGrid), last(params.sGrid)
         b_min, b_max = first(params.bGrid), last(params.bGrid)
-        @variable(model, l_min <= l <= l_max)
-        @variable(model, s_min <= s <= s_max)
-        @variable(model, b_min <= b <= b_max)
+        l_start = l_max
+        s_start = (s_max+s_min)/2
+        b_start = (b_max+b_min)/2
+        @variable(model, l_min <= l <= l_max, start = l_start)
+        @variable(model, s_min <= s <= s_max, start = s_start)
+        @variable(model, b_min <= b <= b_max, start = b_start)
 
         @NLobjective(model, Max, G_interp(l,s,b)) # maximizing interpolated G(l,s,b)
-        @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta] +s - params.deltaGrid[iDelta]-b)/(params.wr*l) >= params.α) # constratint 1
-        @NLconstraint(model, (l + params.g*params.deltaGrid[iDelta]) <= params.β*params.deltaGrid[iDelta]) # constratint 2
+        @constraint(model, (1-params.α*params.wr)*l + s - b >= (1-params.g)*params.deltaGrid[iDelta])# constratint 1
+        @constraint(model, l <= (params.β - params.g)*params.deltaGrid[iDelta]) # constratint 2
 
         optimize!(model)
+        @show is_solved_and_feasible(model)
+        @show stat = termination_status(model)
 
-        stat = termination_status(model)
         if stat == MathOptInterface.OPTIMAL || stat == MathOptInterface.LOCALLY_SOLVED
             return [value(l), value(s), value(b)]
         else
             error("Optimization did not converge: status = $stat")
         end
 end
-
-psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)
 
 function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, Rl::T, iterObj_i::IterObj_i{T,S}, iDelta::S, iLambda::S, regime::F) where {T<:Real, S<:Integer, F<:Bool}
     δ = params.deltaGrid[iDelta]; # get the state for Delta
@@ -323,8 +423,8 @@ end
 
 divv = n .+ (1 - params.cL) * params.β * δ .+ QB .* B .- L .- params.g * δ .- SS .- params.cM .* L.^2 .- params.cO
 G = psi.([params], divv) .+ params.β * iterObj_i.EV
-
-sol = solve_bank_problem(params, vFuncs, iDelta, iLambda, iN, G)
+@show sum(G)
+sol = solve_bank_problem2(params, vFuncs, iDelta, iLambda, iN, G)
 
 #################################### Dive into solve_bank_problem
 
@@ -338,8 +438,6 @@ G_interp(l, s, b) = G_itp_ext(l, s, b)
 
 G_interp(1.2, -2.1, 10.005)
 
-(l + params.g*params.deltaGrid[iDelta] +200.0 - params.deltaGrid[iDelta]-b)/(params.wr*l) >= params.α
-(10.0 + params.g*params.deltaGrid[iDelta]) <= params.β*params.deltaGrid[iDelta]
 
 
 
