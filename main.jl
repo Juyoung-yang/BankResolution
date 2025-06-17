@@ -175,10 +175,6 @@ end
 ## function for iterating on the value function given Rl, w
 function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T<:Real, S<:Integer, F<:Bool}
 
-    function psi(d)
-        return d >= 0 ? (d + params.dBar)^params.sigma  - params.dBar^params.sigma : 1 - e^(-d)
-    end
-
     # 1. initiate value functions 
     vFuncs = Initiate_vFunc(params);
     vFuncsNew = Initiate_vFuncNew(params); 

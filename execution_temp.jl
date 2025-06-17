@@ -5,7 +5,7 @@ include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\
 
 # module MyTypes
     # export Params, VFuncs, VFuncsNew, IterObj_i, Initiate_Params, Initiate_vFunc, Initiate_vFuncNew, Initiate_IterObj_i, inter_v_temp, gen_V_temp, gen_EV_temp, gen_EV!, NAV, tax, n_failure, n_success, psi, gen_V_temp, VFI_i, solve_bank_problem2
-    using JuMP, Ipopt, Interpolations, MathOptInterface, LinearAlgebra, ForwardDiff
+    using JuMP, Ipopt, Interpolations, MathOptInterface, LinearAlgebra, ForwardDiff, Plots
 
     struct Params{T<:Real,S<:Integer}
     qd::T
@@ -143,6 +143,18 @@ include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\
     return IterObj_i{T,S}(EV, G, solution, solution_index, failure)
     end
 
+    function Initiate_MatrixIterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
+        IterObj_is = Matrix{IterObj_i{T,S}}(undef, length(params.deltaGrid), length(params.lambdaGrid));
+
+        for iDelta in 1:length(params.deltaGrid)
+            for iLambda in 1:length(params.lambdaGrid)
+                IterObj_is[iDelta, iLambda] = Initiate_IterObj_i(params);
+            end
+        end
+
+        return IterObj_is; # return a vector {IterObj_iy[iy]} s.t. a vector of iy-contingent struct IterObj_iy
+    end
+
     function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T  where {T<:Real, S<:Integer, F<:Bool}
         nRange = range(params.nGrid[1], stop = params.nGrid[end], length = length(params.nGrid)) # ex) 0:0.5:2
         lambdaRange = params.lambdaGrid
@@ -251,9 +263,16 @@ include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\
     div_func(l::T,s::T,b::T,n::T)::T = n + (1-params.cL)*params.β*δ + vFuncs.qBond[l,s,b,iDelta,iLambda]*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
 
     function div_func_with_solution(params::Params{T,S}, vFuncs::VFuncs{T,S},iDelta::S,iLambda::S,l::T,s::T,b::T,n::T)::T
-        # need to interpolate qBond at the optimum level (l,s,b)
+        # need to interpolate qBond at the optimum level (l,s,b) given state (iDelta, iLambda) with n 
 
-        qBond_interpolated = itp()
+        lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid))
+        sRange = range(first(params.sGrid), last(params.sGrid), length(params.sGrid))
+        bRange = range(first(params.bGrid), last(params.bGrid), length(params.bGrid))
+        qBond_Matrix = @view vFuncs.qBond[:,:,: , iDelta, iLambda]
+
+        itp = interpolate(qBond_Matrix, BSpline(Quadratic(Line(OnGrid()))))
+        itp = Interpolations.scale(itp, lRange, sRange, bRange) # scale the interpolation to the grid ranges
+        qBond_interpolated = itp(l, s, b) # qBond[l,s,b,iDelta,iLambda] interpolated at (l,s,b)
 
         div_interpolated = n + (1-params.cL)*params.β*δ + qBond_interpolated*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
         return div_interpolated 
@@ -298,7 +317,7 @@ include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\
     
         V_temp = gen_V_temp(l,s,b,params,vFuncs, regime) # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
         EV_conditional = dot(params.H[iDelta, :], V_temp * params.Γ[:, iLambda]) # the return is a scalar 
-        return EV_conditional 
+        return EV_conditional # expected value 
     end
 
     # 1-3) iterate over all (il, is, ib) to get EV[L,S,B]: gen_EV function 
@@ -359,10 +378,10 @@ include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\
         end
     end
 
-    function update_VF_with_solution(sol, params::Params{T,S},vFuncs::VFuncs{T,S},regime,n::T)::T
+    function update_VF_with_solution(params::Params{T,S},vFuncs::VFuncs{T,S}, regime, iDelta::S, iLambda::S, sol::Array{T,1}, n::T) where {T<:Real, S<:Integer}
         l,s,b = sol[1], sol[2], sol[3] # the values of (l,s,b)
         ev = gen_EV_temp(l,s,b,params,vFuncs,regime) 
-        div_val = div_func_with_solution(l,s,b,n)
+        div_val = div_func_with_solution(params, vFuncs, iDelta, iLambda, l,s,b,n)
         return psi(params, div_val) + params.β* ev
     end
 
@@ -375,34 +394,23 @@ include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\
         B = reshape(params.bGrid, 1, 1, :)    # 1  × 1  × nB
         QB = @view vFuncs.qBond[:, :, :, iDelta, iLambda]  # nL × nS × nB
         divv = n .+ (1 - params.cL) * params.β * δ .+ QB .* B .- L .- params.g * δ .- SS .- params.cM .* L.^2 .- params.cO
-        
-        # div(l,s,b) = n + (1-params.cL)*params.β*δ + vFuncs.qBond[l,s,b,iDelta,iLambda]*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
-        # div = n .+ (1-params.cL)*params.β*δ .+ vFuncs.qBond[:, :, :, iDelta, iLambda]*b - L .- params.g*δ .- S - params.cM*L.^2 .- params.cO # (nL, nS, nB) matrix
+
         gen_EV!(params,vFuncs,iterObj_i,regime)
         G = psi.([params], divv) .+ params.β * iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix with fixed n 
 
-        #### psi ####
-
         # G above will be feeded into solve_bank_problem for interpolating v at (l,s,b) and then solve for (l,s,b)
-        sol = solve_bank_problem2(params, vFuncs, iDelta, iLambda, iN, G); # find the solution, a vector with 3 elements (l,s,b)
-        @show sol, size(sol), typeof(sol)
+        sol = solve_bank_problem2(params, vFuncs, iDelta, iLambda, iN, G); # (KEY) find the solution, a vector with 3 elements (l,s,b)
         iterObj_i.solution[iN] = sol; # store the solution in iterObj_i.solution
-        @show NAV.([sol[1]], [sol[2]], [sol[3]], params.lambdaGrid)
         iterObj_i.failure[iN] = [NAV(sol[1], sol[2], sol[3], lamPrime) < 0 for lamPrime in params.lambdaGrid] # if true, bank fails 
-        @show iterObj_i.failure[iN]
-        vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime,n)
+        vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(params, vFuncs, regime, iDelta, iLambda, sol, n)
     end
 end  
 
     function solve_bank_problem2(params::Params{T,S},vFuncs::VFuncs{T,S},iDelta::S,iLambda::S,iN::S,G::Array{T,3}) where {T<:Real, S<:Integer}
-        # construct objective function int_G: interpolated function[l,s,b] using G as inputs
-        # G_itp = interpolate(G, BSpline(Quadratic(Line(OnGrid())))) 
+
         lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid))
         sRange = range(first(params.sGrid), last(params.sGrid), length(params.sGrid))
         bRange = range(first(params.bGrid), last(params.bGrid), length(params.bGrid))
-       #  G_itp = Interpolations.scale(G_itp, lRange, sRange, bRange)
-       #  G_itp_ext = extrapolate(G_itp, Line())     # enables linear extrapolation
-       #  G_interp(l, s, b) = G_itp_ext(l, s, b)
 
         Gmin = minimum(G)
         Gmax = maximum(G)
@@ -411,28 +419,27 @@ end
         G_itp_rev = Interpolations.scale(G_itp_rev, lRange, sRange, bRange)
         G_itp_ext_rev = extrapolate(G_itp_rev, Line())
         G_interp_rev(l, s, b) = G_itp_ext_rev(l, s, b)
-        # G_interp_scaled(l,s,b) = G_itp_ext_rev(l,s,b) * (Gmax - Gmin) + Gmin
 
         model = Model(Ipopt.Optimizer)
         set_optimizer_attribute(model, "tol", 1e-8)
-        set_optimizer_attribute(model, "acceptable_tol", 1e-5)
+        set_optimizer_attribute(model, "acceptable_tol", 1e-6)
         set_optimizer_attribute(model, "max_iter", 2500)
         set_optimizer_attribute(model, "acceptable_iter", 10)
         set_optimizer_attribute(model, "print_level", 5)
         set_optimizer_attribute(model, "hessian_approximation", "limited-memory")
-        # JuMP.register(model, :G_interp, 3, G_interp; autodiff = true)
+     
         JuMP.register(model, :G_interp_rev, 3, G_interp_rev; autodiff = true)
-        l_min, l_max = (last(params.lGrid)+first(params.lGrid))/2, last(params.lGrid)
-        @show l_min, l_max
+        l_min, l_max = first(params.lGrid), last(params.lGrid) # (last(params.lGrid)+first(params.lGrid))/2, last(params.lGrid)
         s_min, s_max = first(params.sGrid), last(params.sGrid)
         b_min, b_max = first(params.bGrid), last(params.bGrid)
-        l_start = l_max
+        l_start = (l_max+l_min)/2
         s_start = (s_max+s_min)/2
         b_start = (b_max+b_min)/2
+        println("c1 residual = ", (1-params.α*params.wr)*l_start + s_start - b_start - (1-params.g)*params.deltaGrid[iDelta])
+        println("c2 residual = ", l_start - (params.β - params.g)*params.deltaGrid[iDelta])
         @variable(model, l_min <= l <= l_max, start = l_start)
         @variable(model, s_min <= s <= s_max, start = s_start)
         @variable(model, b_min <= b <= b_max, start = b_start)
-
         println("G_interp at start = ", G_interp_rev(l_start, s_start, b_start))
         grad = ForwardDiff.gradient(u -> G_interp_rev(u[1], u[2], u[3]), [l_start, s_start, b_start])
         println("gradient at start = ", grad)
@@ -460,16 +467,136 @@ end
     end
 # end
 
+function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T<:Real, S<:Integer, F<:Bool}
+
+    # 1. initiate value functions 
+    vFuncs = Initiate_vFunc(params);
+    vFuncsNew = Initiate_vFuncNew(params); 
+    Iterobj_is = Initiate_MatrixIterObj_i(params); 
+
+    # 1-2. set the qBond schedule based on regime
+    if regime == false # ordinary regime
+        vFuncs.qBond[:, :, :, :, :] .= params.β; # set qBond to be 1 for all states 
+    else # special regime
+        qBond_specialRegime(params,vFuncs,Rl) # set qBond to be 1 for all states 
+    end
+    
+    ## 2. set numbers for iteration and set the iteration  
+    iter, maxdiffs, diffs = 1, one(T), zeros(T);
+
+    # 3. start the iteration
+    while iter <= maxiter && maxdiffs > tol
+
+        # 3-1. set the value function for the next iteration
+
+        # 3-2. The main iteration loop 
+        Threads.@threads for iDelta in 1:length(params.deltaGrid) # 3: number of states for Delta
+            println(iDelta)
+                 Threads.@threads for iLambda in 1:length(params.lambdaGrid)  # 3: number of states for Lambda
+                    println(iLambda)
+                    VFI_i(params, vFuncs, vFuncsNew, Rl, Iterobj_is[iDelta, iLambda], iDelta, iLambda, regime); # VFI for a given exogenous state (iDelta, iLambda)
+                end
+        end
+
+        diffs = Update_vFuncs_Diffs(vFuncs, vFuncsNew, params); # after the optimization, calculate the differene 
+        @show maxdiffs = maximum(diffs);
+
+        if mod(iter, 200) == 0
+            println("iter=", iter, ", maxdiffs=", maxdiffs); # report the iteration progress 
+        end
+
+        # 3-3. if the difference is not small enough, do the iteration again
+        iter += 1;
+    end
+
+    # 4. finish the iteration and return the value function 
+    return (vFuncs = vFuncs, Iterobj_is = Iterobj_is);  
+end
+
+function Update_vFuncs_Diffs(vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, params::Params{T,S}) where {T<:Real, S<:Integer}; # after the optimization, calculate the differene
+
+    # 1. update vFuncsNew objects to vFuncs
+    vFuncs.VF .= vFuncsNew.VF; # update EVF
+
+    # 2. calculate the difference of VF_0 and VF_1 
+    vFuncsNew.diffs .= vFuncsNew.VF - vFuncs.VF; # difference between VF and VF_new
+    diffs = norm(vFuncsNew.diffs, Inf); # infinity norm of the difference of VF
+    return diffs
+end
+
+function qBond_condiState(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDelta::S) where {T<:Real,S<:Integer} 
+        
+    l, s, b, Delta = params.lGrid[il], params.sGrid[is], params.bGrid[ib], params.deltaGrid[iDelta]
+
+    lambdaStar(l,s,b,Delta) = (Rl*(l+params.g*Delta)+(1+params.Rf)*s-Delta-b)/(Rl*l)
+    
+    function return_temp_underFailure(l,s,b,Delta,Lambda)::T
+        b == 0 && return zero(T)
+        term = Rl*((1-Lambda)*l+params.g*Delta)+(1+params.Rf)*s 
+        num = max(min(b,max(zero(T),params.cF*term-Delta)),term-Delta-params.α*params.wr*Rl*(1-Lambda)*l)
+        return num/b
+    end
+
+    lambdaStar_val = lambdaStar(l,s,b,Delta) # calculate lambdaStar for the given state (l,s,b,Delta)
+    return_temp_underFailure_val = ntuple(i -> return_temp_underFailure(l,s,b,Delta,params.lambdaGrid[i]), 3) # calculate return_temp_underFailure for the given state (l,s,b,Delta)
+    qBond_temp = zeros(T, 3)
+
+    if lambdaStar_val < params.λL # Fail all the time  
+        return qBond_temp .= return_temp_underFailure_val
+    elseif (params.λL <= lambdaStar_val) && (lambdaStar_val < params.λM)
+        return qBond_temp .= (one(T), return_temp_underFailure_val[2], return_temp_underFailure_val[3])
+    elseif (params.λM <= lambdaStar_val) && (lambdaStar_val< params.λH)
+        return qBond_temp .= (one(T), one(T), return_temp_underFailure_val[3])
+    else # No failure at all
+        return qBond_temp .= one(T)
+    end
+
+    return params.β * (params.Markov_Lambda * qBond_temp)
+end
+
+
+function qBond_specialRegime(params::Params{T,S}, vFuncs::VFuncs{T,S}, Rl::T) where {T<:Real,S<:Integer}
+    for il in eachindex(params.lGrid)
+        for is in eachindex(params.sGrid)
+            for ib in eachindex(params.bGrid)
+                for iDelta in eachindex(params.deltaGrid)
+                    vFuncs.qBond[il,is,ib,iDelta,:] .= qBond_condiState(params,Rl,il,is,ib,iDelta)
+                end
+            end
+        end
+    end
+    return vFuncs
+end
+
+
 ################################################################################################################################################
 # include("MyTypes.jl")
 # using .MyTypes
 params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,Γ,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
 vFuncs = Initiate_vFunc(params)
 vFuncsNew = Initiate_vFuncNew(params)
+vFuncsNew.VF[iDelta, iLambda, :]
 iterObj_i = Initiate_IterObj_i(params)
 iDelta = 3; iLambda = 1; regime = false; Rl = 1.0
 
 sol2 = VFI_i(params, vFuncs, vFuncsNew, Rl, iterObj_i, iDelta, iLambda, regime)
+plot(vFuncsNew.VF[iDelta, iLambda, :])
+
+@time vfi = VFI(params, Rl, regime, 1000, 1e-6) # run the VFI algorithm with the given parameters and regime
+vfi.vFuncs.VF[:,:,10]
+vfi.vFuncs.qBond
+vfi.vFuncs.X
+
+vfi.Iterobj_is[1,1].solution
+vfi.Iterobj_is[1,2].solution
+vfi.Iterobj_is[2,1].solution
+sum(vfi.Iterobj_is[2,2].failure)
+fieldnames(VFuncs), fieldnames(VFuncsNew), fieldnames(IterObj_i)
+
+@time vfi_special = VFI(params, Rl, true, 1000, 1e-6) # run the VFI algorithm with the given parameters and regime
+vfi_special.vFuncs.qBond[:,5,5,3,:]
+sum(vfi_special.Iterobj_is[2,2].failure) 
+
 
 ################################################################################################################################################
 
