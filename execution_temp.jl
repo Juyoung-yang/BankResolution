@@ -2,9 +2,11 @@
 pwd()
 
 
+
 # include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\main.jl")
 include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\parameters.jl")
 include("/Users/juyoungyang_kdi/BankResolution/parameters.jl")
+include("/Users/juyoungyang_kdi/BankResolution/main.jl")
 
 import Pkg; Pkg.add("Ipopt")
 
@@ -535,86 +537,36 @@ end
 
 
 ################################################################################################################################################
-# include("MyTypes.jl")
-using .MyTypes
-# names(MyTypes)
 
-params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,Γ,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
-vFuncs = Initiate_vFunc(params)
-vFuncsNew = Initiate_vFuncNew(params)
-vFuncsNew.VF[iDelta, iLambda, :]
-iterObj_i = Initiate_IterObj_i(params)
-iDelta = 3; iLambda = 1; regime = false; Rl = 1.0
+regime = false; Rl = 1.0
+@time eq = VFI(params, Rl, regime, 1000, 1e-6) # run the VFI algorithm with the given parameters and regime
+eq.vFuncs.VF[:,:,10]
+eq.vFuncs.qBond
+eq.vFuncs.X
 
-sol2 = VFI_i(params, vFuncs, vFuncsNew, Rl, iterObj_i, iDelta, iLambda, regime)
-plot(vFuncsNew.VF[iDelta, iLambda, :])
-
-@time vfi = VFI(params, Rl, regime, 1000, 1e-6) # run the VFI algorithm with the given parameters and regime
-vfi.vFuncs.VF[:,:,10]
-vfi.vFuncs.qBond
-vfi.vFuncs.X
-
-vfi.Iterobj_is[1,1].solution
-vfi.Iterobj_is[1,2].solution
-vfi.Iterobj_is[2,1].solution
-sum(vfi.Iterobj_is[2,2].failure)
-fieldnames(VFuncs), fieldnames(VFuncsNew), fieldnames(IterObj_i)
-
-@time vfi_special = VFI(params, Rl, true, 1000, 1e-6) # run the VFI algorithm with the given parameters and regime
-vfi_special.vFuncs.qBond[:,5,5,3,:]
-sum(vfi_special.Iterobj_is[2,2].failure) 
+eq.Iterobj_is[1,1].solution
+eq.Iterobj_is[1,2].solution
+eq.Iterobj_is[2,1].solution
+sum(eq.Iterobj_is[2,2].failure)
 
 
-################################################################################################################################################
+@time eq_special = VFI(params, Rl, true, 1000, 1e-6) # run the VFI algorithm with the given parameters and regime
+eq_special.vFuncs.qBond[:,5,5,3,:]
+sum(eq_special.Iterobj_is[2,2].failure) 
 
-@show typeof(iterObj_i2.solution)
-sol = solve_bank_problem2(params, vFuncs, iDelta, iLambda, iN, G)
+###############################################################################################################################################
+
+# params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,Γ,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+# vFuncs = Initiate_vFunc(params)
+# vFuncsNew = Initiate_vFuncNew(params)
+# iterObj_i = Initiate_IterObj_i(params)
+# iDelta = 3; iLambda = 1;  
+# sol2 = VFI_i(params, vFuncs, vFuncsNew, Rl, iterObj_i, iDelta, iLambda, regime)
 
 ####################################
 
 
 
-n = params.nGrid[iN]; δ = params.deltaGrid[iDelta]; lambda = params.lambdaGrid[iLambda]; Rl = 1.03;
-@show n, δ, lambda, Rl, params.deltaGrid[iDelta]
-l, s, b = 0.0, 70.0, 10.0
-L = reshape(params.lGrid, :, 1, 1)    # nL × 1 × 1       
-SS = reshape(params.sGrid, 1, :, 1)   # 1  × nS × 1
-B = reshape(params.bGrid, 1, 1, :)    # 1  × 1  × nB
-QB = @view vFuncs.qBond[:, :, :, iDelta, iLambda] 
-@show typeof(QB)
-@show params.lambdaGrid, params.deltaGrid, params.nGrid
-
-function done()
-    # examine the evaluation works: Okay!
-    @show tax(l,s,-b,lambda), tax(l+10.0,s,b,lambda) # OKAY
-    @show NAV(l,s, b, lambda), NAV(10.0, 1000.0, 1.0, 0.001) # OKAY
-    @show n_failure(10.0, 0.02), n_failure(10.0, 0.2) # OKAY
-    @show n_success(10.0, 1000.0, 1.0, 0.001), NAV(10.0, 1000.0, 1.0, 0.001), tax(10.0, 1000.0, 1.0, 0.001) # OKAY
-
-    # examine the interpotation works 
-    @show inter_v_temp(params, vFuncs, δ, lambda, 1000.234) # OKAY, able to evaluate for any n, even a negative one 
-    @show inter_v_temp.([params], [vFuncs], [δ], [lambda], collect(10.0:1.0:20.0)) # OKAY, using bracketing, able to evaluate for an array of n
-
-    @show gen_V_temp(10.0,80.0,b,params, vFuncs, regime) # OKAY 
-    gen_EV!(params,vFuncs,iterObj_i,regime) # OKAY
-end
-
-divv = n .+ (1 - params.cL) * params.β * δ .+ QB .* B .- L .- params.g * δ .- SS .- params.cM .* L.^2 .- params.cO
-G = psi.([params], divv) .+ params.β * iterObj_i.EV
-@show sum(G)
-
-
-#################################### Dive into solve_bank_problem
-
-G_itp = interpolate(G, BSpline(Quadratic(Line(OnGrid())))) 
-lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid))
-sRange = range(first(params.sGrid), last(params.sGrid), length(params.sGrid))
-bRange = range(first(params.bGrid), last(params.bGrid), length(params.bGrid))
-G_itp = Interpolations.scale(G_itp, lRange, sRange, bRange)
-G_itp_ext = extrapolate(G_itp, Line())     # enables linear extrapolation
-G_interp(l, s, b) = G_itp_ext(l, s, b)
-
-G_interp(1.2, -2.1, 10.005)
 
 
 
@@ -636,68 +588,3 @@ G_interp(1.2, -2.1, 10.005)
 
 
 
-
-
-
-
-
-
-
-
-
-
-vFuncs = Initiate_vFunc(params)
-iterObj_i = Initiate_IterObj_i(params)
-QB = @view vFuncs.qBond[:, :, :, iDelta, iLambda] # nL × nS × nB
-
-L = reshape(params.lGrid, :, 1, 1)    # nL × 1 × 1       
-SS = reshape(params.sGrid, 1, :, 1)   # 1  × nS × 1
-B = reshape(params.bGrid, 1, 1, :)    # 1  × 1  × nB
-
-div = n .+ (1 - params.cL) * params.β * δ .+ QB .* B .- L .- params.g * δ .- SS .- params.cM .* L.^2 .- params.cO
-        
-# div(l,s,b) = n + (1-params.cL)*params.β*δ + vFuncs.qBond[l,s,b,iDelta,iLambda]*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
-# div = n .+ (1-params.cL)*params.β*δ .+ vFuncs.qBond[:, :, :, iDelta, iLambda]*b - L .- params.g*δ .- S - params.cM*L.^2 .- params.cO # (nL, nS, nB) matrix
-gen_EV!(params, vFuncs, iterObj_i, regime)
-G = psi.([params], div) .+ params.β * iterObj_i.EV # G(l,s,b,n) = flow utility[l,s,b,n] + β * EV[l,s,b], (nL, nS, nB) matrix with fixed n 
-
-
-
-# G is well defined! 
-G_itp = interpolate(G, BSpline(Quadratic(Line(OnGrid())))) 
-lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid))
-sRange = range(first(params.sGrid), last(params.sGrid), length(params.sGrid))
-bRange = range(first(params.bGrid), last(params.bGrid), length(params.bGrid))
-G_itp = Interpolations.scale(G_itp, lRange, sRange, bRange)
-G_itp_ext = extrapolate(G_itp, Line())     # enables linear extrapolation
-G_interp(l, s, b) = G_itp_ext(l, s, b)
-
-
-model = Model(Ipopt.Optimizer)
-set_optimizer_attribute(model, "tol", 1e-8)
-set_optimizer_attribute(model, "max_iter", 10)
-set_optimizer_attribute(model, "acceptable_tol", 1e-6)
-JuMP.register(model, :G_interp, 3, G_interp; autodiff = true)
-l_min, l_max = first(params.lGrid) + eps(), last(params.lGrid)
-s_min, s_max = first(params.sGrid), last(params.sGrid)
-b_min, b_max = first(params.bGrid), last(params.bGrid)
-@variable(model, l_min <= l <= l_max, start = (l_min+l_max)/2)
-@variable(model, s_min <= s <= s_max, start = (s_min+s_max)/2)
-@variable(model, b_min <= b <= b_max, start = (b_min+b_max)/2)
-
-@NLobjective(model, Max, G_interp(l,s,b)) # maximizing interpolated G(l,s,b)
-@NLconstraint(model, (l + params.g*params.deltaGrid[iDelta] +s - params.deltaGrid[iDelta]-b)/(params.wr*l) >= params.α) # constratint 1
-@NLconstraint(model, (l + params.g*params.deltaGrid[iDelta]) <= params.β*params.deltaGrid[iDelta]) # constratint 2
-
-optimize!(model)
-
-
-
-
-stat = termination_status(model)
-
-if stat == MathOptInterface.OPTIMAL || stat == MathOptInterface.LOCALLY_SOLVED
-    [value(l), value(s), value(b)]
-else
-   error("Optimization did not converge: status = $stat")
-end
