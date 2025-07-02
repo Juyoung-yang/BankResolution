@@ -437,4 +437,71 @@ function Update_vFuncs_Diffs(vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, par
     return diffs
 end
 
-###################################### OLD CODE #############
+################################################################################################################################################
+
+function update_stationary_dist(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, Iterobj_is::Matrix{IterObj_i{T,S}}, iDelta::S, iLambda::S, iN::S, iLambdaPrime::S) where {T<:Real,S<:Integer}
+   
+    # 1. determining failure or success and consequential nPrime
+    if Iterobj_is[iDelta, iLambda].failure[iN][iLambda] == 1 # if fail in (iDelta, iLambda, in, iLambda)
+        nPrime = n_failure(l, lambda)
+    elseif Iterobj_is[iDelta, iLambda].failure[iN][iLambda] == 0 # if success in (iDelta, iLambda, in, iLambda)
+        nPrime = n_success(l, s, b, lambda)
+    else
+
+    # 2. assigning mass weight 
+    if searchsortedlast(params.nGrid, nPrime) == 0 # if n is smaller than the minimum nGrid
+        vFuncsNew.Γ[:, iLambdaPrime, 1] .+= params.H[iDelta, :] .* vFuncs.Γ[iDelta, iLambda, iN] .* params.G[iLambdaPrime,iLambda]
+    elseif searchsortedlast(params.nGrid, nPrime) == length(params.nGrid) # if n is larger than the maximum nGrid
+        vFuncs.Γ[:, iLambda, length(params.nGrid)] .+= params.H[iDelta, :] .* vFuncs.Γ[iDelta, iLambda, iN] .* params.G[iLambdaPrime,iLambda]
+    else # set in between
+        iNn, iNnPrime = searchsortedlast(params.nGrid, nPrime), searchsortedfirst(params.nGrid, nPrime)
+        vFuncsNew.Γ[:,iLambdaPrime,iNnPrime] .+= params.H[iDelta, :] .* ((nPrime - params.nGrid[iNn]) / (params.nGrid[iNnPrime] - params.nGrid[iNn])) * vFuncs.Γ[iDelta, iLambda, iN] .* params.G[iLambdaPrime,iLambda]
+        vFuncsNew.Γ[:,iLambdaPrime,iNn] .+= params.H[iDelta, :] .* ((params.nGrid[iNnPrime] - nPrime) / (params.nGrid[iNnPrime] - params.nGrid[iNn])) * vFuncs.Γ[iDelta, iLambda, iN] .* params.G[iLambdaPrime,iLambda]
+    end
+end
+
+function stationary_distribution(params::Params{T,S},vFuncs::VFuncs{T,S},Iterobj_is::Matrix{IterObj_i{T,S}}) where {T<:Real,S<:Integer}
+
+    iter, maxdiffs, diffs = 1, one(T), zeros(T);
+
+    while iter <= maxiter && maxdiffs > tol
+
+        Threads.@threads for iDelta in 1:length(params.deltaGrid) # 3: number of states for Delta
+         Threads.@threads for iLambda in 1:length(params.lambdaGrid)  # 3: number of states for Lambda
+            Threads.@threads for iN in 1:length(params.nGrid)
+                Threads.@threads for iLambdaPrime in 1:length(params.lambdaGrid)
+                        update_stationary_dist(params, vFuncs, Iterobj_is, iDelta, iLambda, in, iLambdaPrime)
+                    end
+                end
+            end
+        end
+
+        vFuncsNew.Γ ./= sum(vFuncsNew.Γ) # normalize the distribution
+
+        diffs =
+        maxdiffs = 
+
+        if mod(iter, 200) == 0
+            println("iter=", iter, ", maxdiffs=", maxdiffs); # report the iteration progress 
+        end
+
+        # 3-3. if the difference is not small enough, do the iteration again
+        iter += 1;
+    end
+
+    return (vFuncs = vFuncs, Iterobj_is = Iterobj_is);  
+end
+
+function loan_market_clearing(params::Params{T,S}, vFuncs::VFuncs{T,S}) where {T<:Real,S<:Integer}
+
+    # aggregate loan supply, including government guaranteed loan 
+
+    # aggregate loan demand 
+
+
+    excess_loan_supply() = 
+    a,b = 0.0001, 2.0;
+
+    rate = find_zero(f, (a, b), Bisection(); tol=1e-8, maxevals=100)
+    return rate
+end
