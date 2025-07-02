@@ -8,15 +8,9 @@ include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\
 include("/Users/juyoungyang_kdi/BankResolution/parameters.jl")
 include("/Users/juyoungyang_kdi/BankResolution/main.jl")
 
-import Pkg; Pkg.add("Ipopt")
+using JuMP, Ipopt, Interpolations, MathOptInterface, LinearAlgebra, ForwardDiff, Plots, Ipopt
 
- module MyTypes
-    # export Params, VFuncs, VFuncsNew, IterObj_i, Initiate_Params, Initiate_vFunc, Initiate_vFuncNew, Initiate_IterObj_i, inter_v_temp, gen_V_temp, gen_EV_temp, gen_EV!, NAV, tax, n_failure, n_success, psi, gen_V_temp, VFI_i, solve_bank_problem2
-    using JuMP, Ipopt, Interpolations, MathOptInterface, LinearAlgebra, ForwardDiff, Plots
-
-    export Initiate_Params, Initiate_vFunc, Initiate_vFuncNew, Initiate_IterObj_i
-
-    struct Params{T<:Real,S<:Integer}
+struct Params{T<:Real,S<:Integer}
         qd::T
         β::T
         Rf::T
@@ -40,8 +34,8 @@ import Pkg; Pkg.add("Ipopt")
         cO::T
         cL::T
 
-        H  # transition matrix
-        Γ  # transition matrix
+        H  # transition matrix for delta: [delta, deltaPrime] so that sum(H[1,:]) = 1 
+        F  # transition matrix for lambda: [lambdaPrime, lambda] so that sum(G[:,1]) = 1
 
         λL::T
         λM::T
@@ -77,32 +71,34 @@ import Pkg; Pkg.add("Ipopt")
      # Pz::Array{T,2}
      # Ycons::Array{T,2}
      # DebtIncrease::Array{T,2}
-    end
+end
 
-    struct VFuncs{T<:Real,S<:Integer}
+struct VFuncs{T<:Real,S<:Integer}
         VF::Array{T,3} # value function, [Delta* Lambda* n]
         qBond::Array{T,5} # bank bond price schedule, [bPrime* lPrime* sPrime* Delta* Lambda]
         Rl::T # loan interest rate
         X::Array{T,4} # bank's failure decision 
-    end
+        Γ::Array{T,3} # bank mass for each state, [Delta* Lambda* n]
+end
 
-    struct VFuncsNew{T<:Real,S<:Integer} # storing updated outcome after VFI
+struct VFuncsNew{T<:Real,S<:Integer} # storing updated outcome after VFI
         VF::Array{T,3} # value function, [Delta* Lambda* n]
         qBond::Array{T,5} # bank bond price schedule, [bPrime* lPrime* sPrime* Delta* Lambda]
         Rl::T # loan interest rate
         X::Array{T,4} # bank's failure decision 
         diffs::Array{T,3} # difference between VF VF_new
-    end
+        Γ::Array{T,3} # bank mass for each state, [Delta* Lambda* n]
+end
 
-    struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), objects used in VFI_i
+struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), objects used in VFI_i
         EV::Array{T,3} # EV[l,s,b]
         G::Array{T,4} # G(l,s,b,n)
         solution::Array{Array{T,1},1} # optimizer = [(l,s,b)]
         solution_index::Array{Array{T,1},1} # optimizer = [(il,is,ib) for each n] 
         failure::Array{Array{T,1},1} # failure decision = [(fail or not fail vector for each lambda prime) for each n]
-    end
+end
 
-    function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,α1::T,α2::T,α3::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,H::Array{T,2},Γ::Array{T,2},λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
+function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,α1::T,α2::T,α3::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,H::Array{T,2},F::Array{T,2},λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
         deltaGrid = [δL,δM,δH] # Define a Tuple, immutable 
         lambdaGrid = [λL,λM,λH] # regular array, mutable
         nGrid = range(n_start,stop=n_stop,length=n_npts)
@@ -111,30 +107,32 @@ import Pkg; Pkg.add("Ipopt")
         sGrid = range(s_start,stop=s_stop,length=s_npts)
         bGrid = range(b_start,stop=b_stop,length=b_npts)
     
-        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,Γ,λL,λM,λH,γ,ϕ,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
+        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,H,F,λL,λM,λH,γ,ϕ,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
         return pam
-    end
+end
 
-    function Initiate_vFunc(params::Params{T,S}) where {T<:Real,S<:Integer}
+function Initiate_vFunc(params::Params{T,S}) where {T<:Real,S<:Integer}
         VF = ones(3, 3, length(params.nGrid)); # expected value function
         qBond = zeros(length(params.lGrid), length(params.nGrid), length(params.bGrid), 3, 3); # bank bond price schedule
         Rl = 0; # loan interest rate
         X = zeros(3, 3, length(params.nGrid), 3); # bank's failure decision 
-    
-        return VFuncs{T,S}(VF, qBond, Rl, X)
-    end
+        Γ = ones(3, 3, length(params.nGrid))/sum(ones(3, 3, length(params.nGrid))); # bank mass for each state, [Delta* Lambda* n]
+ 
+        return VFuncs{T,S}(VF, qBond, Rl, X, Γ)
+end
 
-    function Initiate_vFuncNew(params::Params{T,S}) where {T<:Real,S<:Integer}
+function Initiate_vFuncNew(params::Params{T,S}) where {T<:Real,S<:Integer}
         VF = zeros(3, 3, length(params.nGrid)); # expected value function
         qBond = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid), 3, 3); # bank bond price schedule
         Rl = 0; # loan interest rate
         X = zeros(3, 3, length(params.nGrid), 3); # bank's failure decision 
         diffs = zeros(3, 3, length(params.nGrid)); # difference between VF and VF_new
+        Γ = ones(3, 3, length(params.nGrid))/sum(ones(3, 3, length(params.nGrid))); # bank mass for each state, [Delta* Lambda* n]
 
-        return VFuncsNew{T,S}(VF, qBond, Rl, X, diffs)
-    end
+        return VFuncsNew{T,S}(VF, qBond, Rl, X, diffs, Γ)
+end
 
-    function Initiate_IterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer, F<:Bool}
+function Initiate_IterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer, F<:Bool}
         EV = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid)); # expected value function conditional on a choice of (l,s,b)
         G = zeros(length(params.lGrid), length(params.sGrid), length(params.bGrid), length(params.nGrid)); # bank bond price schedule
 
@@ -148,9 +146,9 @@ import Pkg; Pkg.add("Ipopt")
             failure[i] = zeros(T, 3)
         end
         return IterObj_i{T,S}(EV, G, solution, solution_index, failure)
-    end
+end
 
-    function Initiate_MatrixIterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
+function Initiate_MatrixIterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer}
         IterObj_is = Matrix{IterObj_i{T,S}}(undef, length(params.deltaGrid), length(params.lambdaGrid));
 
         for iDelta in 1:length(params.deltaGrid)
@@ -160,9 +158,9 @@ import Pkg; Pkg.add("Ipopt")
         end
 
         return IterObj_is; # return a vector {IterObj_iy[iy]} s.t. a vector of iy-contingent struct IterObj_iy
-    end
+end
 
-    function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T  where {T<:Real, S<:Integer, F<:Bool}
+function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T  where {T<:Real, S<:Integer, F<:Bool}
         nRange = range(params.nGrid[1], stop = params.nGrid[end], length = length(params.nGrid)) # ex) 0:0.5:2
         lambdaRange = params.lambdaGrid
         deltaRange = params.deltaGrid
@@ -170,9 +168,9 @@ import Pkg; Pkg.add("Ipopt")
         itp = interpolate((nRange, lambdaRange, deltaRange), vfVals, Gridded(Linear())) # , BSpline(Cubic(Line(OnGrid())))
         itp_ext = extrapolate(itp, Line())
         return itp_ext(n, lambda, delta)
-    end
+end
 
-    function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::Array{T,2}  where {T<:Real, S<:Integer, F<:Bool} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
+function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::Array{T,2}  where {T<:Real, S<:Integer, F<:Bool} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
         V_temp = Array{T}(undef, length(params.deltaGrid), length(params.lambdaGrid))  
         
         @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
@@ -194,18 +192,18 @@ import Pkg; Pkg.add("Ipopt")
             end
 
         return V_temp # [nDelta, nLambda] object 
-    end
+end
 
     # 1-2) multiply by transition matrix to get EV \in R: gen_EV_temp function 
-    function gen_EV_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::T  where {T<:Real, S<:Integer, F<:Bool} # incorporate failure array and conditional asset array to get ex-post asset array 
+function gen_EV_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::T  where {T<:Real, S<:Integer, F<:Bool} # incorporate failure array and conditional asset array to get ex-post asset array 
     
         V_temp = gen_V_temp(l,s,b,params,vFuncs, regime) # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
         EV_conditional = dot(params.H[iDelta, :], V_temp * params.Γ[:, iLambda]) # the return is a scalar 
         return EV_conditional 
-    end
+end
 
     # 1-3) iterate over all (il, is, ib) to get EV[L,S,B]: gen_EV function 
-    function gen_EV!(params::Params{T,S},vFuncs::VFuncs{T,S},iterObj_i::IterObj_i{T,S},regime::F) where {T<:Real, S<:Integer, F<:Bool}
+function gen_EV!(params::Params{T,S},vFuncs::VFuncs{T,S},iterObj_i::IterObj_i{T,S},regime::F) where {T<:Real, S<:Integer, F<:Bool}
 
         EV = iterObj_i.EV 
         @inbounds for (il, l) in pairs(params.lGrid)
@@ -216,27 +214,27 @@ import Pkg; Pkg.add("Ipopt")
                      end
                 end
         return iterObj_i
-    end
+end
 
-    function NAV(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
+function NAV(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
         return Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # net asset value of the bank, lambda here is lambda prime 
-    end
+end
 
-    function tax(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
+function tax(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
         return params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *(δ + b)) # tax on the bank's asset value
-    end
+end
 
-    function n_failure(l::T, lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
+function n_failure(l::T, lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
         return params.α * params.wr * Rl * (1-lambda)*l # next period asset conditional on bank failure 
-    end
+end
 
-    function n_success(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
+function n_success(l::T,s::T,b::T,lambda::T)::T where {T<:Real, S<:Integer, F<:Bool} 
         return NAV(l,s,b,lambda) - tax(l,s,b,lambda) # next period asset conditional on bank success 
-    end
+end
 
-    psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)
+psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)
 
-    function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::Array{T,2}  where {T<:Real, S<:Integer, F<:Bool} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
+function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::Array{T,2}  where {T<:Real, S<:Integer, F<:Bool} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
         V_temp = Array{T}(undef, length(params.deltaGrid), length(params.lambdaGrid))  
         @show l,s,b
         @inbounds for (iλ, λprime) in pairs(params.lambdaGrid)
@@ -257,9 +255,9 @@ import Pkg; Pkg.add("Ipopt")
             end
 
         return V_temp # [nDelta, nLambda] object 
-    end
+end
 
-    function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, Rl::T, iterObj_i::IterObj_i{T,S}, iDelta::S, iLambda::S, regime::F) where {T<:Real, S<:Integer, F<:Bool}
+function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, Rl::T, iterObj_i::IterObj_i{T,S}, iDelta::S, iLambda::S, regime::F) where {T<:Real, S<:Integer, F<:Bool}
         δ = params.deltaGrid[iDelta]; # get the state for Delta
         λ = params.lambdaGrid[iLambda]; # get the state for Lambda
 
@@ -432,9 +430,9 @@ import Pkg; Pkg.add("Ipopt")
             iterObj_i.failure[iN] = [NAV(sol[1], sol[2], sol[3], lamPrime) < 0 for lamPrime in params.lambdaGrid] # if true, bank fails 
             vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime,n)
         end
-    end
+end
 
-    function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T<:Real, S<:Integer, F<:Bool}
+function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T<:Real, S<:Integer, F<:Bool}
 
         # 1. initiate value functions 
         vFuncs = Initiate_vFunc(params);
@@ -477,10 +475,10 @@ import Pkg; Pkg.add("Ipopt")
         end
 
         # 4. finish the iteration and return the value function 
-        return (vFuncs = vFuncs, Iterobj_is = Iterobj_is);  
-    end
+        return (vFuncs = vFuncs, vFuncsNew = vFuncsNew, Iterobj_is = Iterobj_is);  
+end
 
-    function Update_vFuncs_Diffs(vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, params::Params{T,S}) where {T<:Real, S<:Integer}; # after the optimization, calculate the differene
+function Update_vFuncs_Diffs(vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, params::Params{T,S}) where {T<:Real, S<:Integer}; # after the optimization, calculate the differene
 
         # 1. update vFuncsNew objects to vFuncs
         vFuncs.VF .= vFuncsNew.VF; # update EVF
@@ -489,9 +487,9 @@ import Pkg; Pkg.add("Ipopt")
         vFuncsNew.diffs .= vFuncsNew.VF - vFuncs.VF; # difference between VF and VF_new
         diffs = norm(vFuncsNew.diffs, Inf); # infinity norm of the difference of VF
         return diffs
-    end
+end
 
-    function qBond_condiState(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDelta::S) where {T<:Real,S<:Integer} 
+function qBond_condiState(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDelta::S) where {T<:Real,S<:Integer} 
         
         l, s, b, Delta = params.lGrid[il], params.sGrid[is], params.bGrid[ib], params.deltaGrid[iDelta]
         lambdaStar(l,s,b,Delta) = (Rl*(l+params.g*Delta)+(1+params.Rf)*s-Delta-b)/(Rl*l)
@@ -518,10 +516,10 @@ import Pkg; Pkg.add("Ipopt")
         end
 
         return params.β * (params.Markov_Lambda * qBond_temp)
-    end
+end
 
 
-    function qBond_specialRegime(params::Params{T,S}, vFuncs::VFuncs{T,S}, Rl::T) where {T<:Real,S<:Integer}
+function qBond_specialRegime(params::Params{T,S}, vFuncs::VFuncs{T,S}, Rl::T) where {T<:Real,S<:Integer}
         for il in eachindex(params.lGrid)
             for is in eachindex(params.sGrid)
                 for ib in eachindex(params.bGrid)
