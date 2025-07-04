@@ -22,9 +22,11 @@ z = 1.0
 cM = 1.3e-5
 cO = 0.2
 cL = 1.0
+ϵ = -1.1 # loan demand elasticity 
 
-H = fill(1/3, 3, 3)  # transition matrix
-Γ = fill(1/3, 3, 3) # transition matrix
+H = fill(1/3, 3, 3)  # transition matrix: [iDelta, iDeltaPrime]
+F = fill(1/3, 3, 3) # transition matrix: [iLambda, iLambdaPrime]
+M = 1.0
 
 λL = 0.0043
 λM = 0.0226
@@ -34,14 +36,14 @@ H = fill(1/3, 3, 3)  # transition matrix
 
 
 n_start = eps()
-n_npts = 11
+n_npts = 5 # 11
 n_stop = 100.0
 l_start = 1.3e-5
-l_npts = 11
+l_npts = 5 # 11
 l_stop = 100.0
 s_start = eps()
-s_npts = 11
+s_npts = 5 # 11
 s_stop = 100.0
 b_start = eps()
-b_npts = 11
+b_npts = 5 # 11
 b_stop = 100.0

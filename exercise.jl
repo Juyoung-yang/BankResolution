@@ -4,21 +4,39 @@ using JuMP
 using Ipopt
 using Interpolations
 using ForwardDiff
+using Roots
+import Pkg; Pkg.add("Roots")
 
-bgrid_start = 0.0
-bgrid_stop = 1.0
-bgrid_npts=5
-typeof(range(bgrid_start,stop=bgrid_stop,length=bgrid_npts))
-AA = [1, 1.2, 30]
-A = (1, 1.2, 20)
-typeof(A)
-AA[1] = 1.2
-AA
+f(x) = x^3 - 2x - 5
+a, b = 2.0, 3.0
+root = find_zero(f, (a, b), Bisection(); tol=1e-8, maxevals=100)
+root
 
-for i in eachindex(0:0.1:1)
-    println(i)
+#######################################
+struct ABCD
+    a::Array{Float64,2}
+    b::Float64
 end
 
+A = ABCD(ones(3,3), 2.0)
+A.a .= 10.0
+A.a
+
+#######################################
+function example123(x; a, b)
+    mid(x) = 2*x + 1
+    mid2(x) = 3*x
+
+    mid = mid(x)
+    mid2 = mid2(x)
+    mid3 = mid + mid2 - x
+    return mid3
+end
+
+example123_singlee(x) = example123(x; a=2.0, b=3.0)
+
+find_zero(example123_singlee, (-10, 10), Bisection(); tol=1e-8, maxevals=100)
+#########################################
 
 typeof(zeros(3,3,3))
 ## example for nonlinear programming with JuMP and Ipopt
