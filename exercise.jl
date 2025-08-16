@@ -27,6 +27,8 @@ Int(2.0)
 using StatsBase, Distributions
 P = [0.7 0.3;
      0.4 0.6];
+
+ones(size(P))
 cats = [Categorical(P[i, :]) for i in 1:size(P,1)]
 s = 1
 next_s = rand(cats[s])

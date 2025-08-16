@@ -853,7 +853,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
     n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l; # next period asset conditional on bank failure 
 
     # Interpolate qBond for a given value of choice (l,s,b) and state (delta, lambda)
-    function qBond_interpolated(l::T, s::T, b::T, deltaInd::S, lambdaInd::S, params::Params{T,S}, vFuncs::VFuncs{T,S})::T
+    function qBond_interpolated(l::T, s::T, b::T, deltaInd::S, lambdaInd::S, params::Params{T,S}, vFuncs::VFuncs{T,S}) where {T<:Real,S<:Integer}
 
         lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid));
         sRange = range(first(params.sGrid), last(params.sGrid), length(params.sGrid));
@@ -861,38 +861,51 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         
 
         q = vFuncs.qBond[:, :, :, deltaInd, lambdaInd];
-        qmin = minimum(q);
-        qmax = maximum(q);
-        qnorm = (q .- qmin) ./ (qmax - qmin);
+        if qmin == qmax # if all values are the same, return the value
+            qnorm = qmin
+        else
+            qnorm = (q .- qmin) ./ (qmax - qmin);
+        end
+
         q_itp_rev = interpolate(qnorm, BSpline(Quadratic(Line(OnGrid()))));
         q_itp_rev = Interpolations.scale(q_itp_rev, lRange, sRange, bRange);
         q_itp_ext_rev = extrapolate(q_itp_rev, Line());
         q_interp_rev(ll, ss, bb) = q_itp_ext_rev(ll, ss, bb);
 
         q_value = q_interp_rev(l, s, b) * (qmax - qmin) + qmin; # interpolate qBond for a given choice (l,s,b)
-        @show q_value
         return q_value
     end
 
     # Interpolate (l,s,b) for a given n value and a given state (delta, lambda)
-    function lsb_interpolated(params::Params{T,S}, policy::PolicyFuncs{T,S}, deltaInd::S, lambdaInd::S, n::T)::NTuple{3,T}
+    function lsb_interpolated(params::Params{T,S}, policy::PolicyFuncs{T,S}, deltaInd::S, lambdaInd::S, n::T) where {T<:Real,S<:Integer}
+
         # Interpolate l, s, b for a given n value and a given state (delta, lambda)
+            nRange = range(first(params.nGrid), last(params.nGrid), length(params.nGrid));
 
-        nRange = range(first(params.nGrid), last(params.nGrid), length(params.nGrid));
+            l_array = policy.lPolicy[deltaInd, lambdaInd, :]; # loan policy function for a given state (delta, lambda)
 
-        l_array = policy.lPolicy[deltaInd, lambdaInd, :]; # loan policy function for a given state (delta, lambda)
-        l_array_min, l_array_max = minimum(l_array), maximum(l_array);
-        l_array_norm = (l_array .- l_array_min) ./ (l_array_max - l_array_min);
+        if l_array_max == l_array_min # if all values are the same, return the value
+            l_array_norm = l_array
+        else
+            l_array_norm = (l_array .- l_array_min) ./ (l_array_max - l_array_min);
+        end
+
         l_itp = interpolate(l_array_norm, BSpline(Quadratic(Line(OnGrid()))));
         l_itp = Interpolations.scale(l_itp, nRange);    
         l_itp_ext = extrapolate(l_itp, Line());
         l_interp(n_val) = l_itp_ext(n_val);
         l_value = l_interp(n) * (l_array_max - l_array_min) + l_array_min; # interpolate loan policy function for a given n value
+        
 
 
         s_array = policy.sPolicy[deltaInd, lambdaInd, :]; # savings policy function for a given state (delta, lambda)
-        s_array_min, s_array_max = minimum(s_array), maximum(s_array);
-        s_array_norm = (s_array .- s_array_min) ./ (s_array_max - s_array_min);
+
+        if s_array_max == s_array_min # if all values are the same, return the value
+            s_array_norm = s_array
+        else
+            s_array_norm = (s_array .- s_array_min) ./ (s_array_max - s_array_min);
+        end
+
         s_itp = interpolate(s_array_norm, BSpline(Quadratic(Line(OnGrid()))));
         s_itp = Interpolations.scale(s_itp, nRange);
         s_itp_ext = extrapolate(s_itp, Line());
@@ -900,8 +913,13 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         s_value = s_interp(n) * (s_array_max - s_array_min) + s_array_min; # interpolate savings policy function for a given n value
 
         b_array = policy.bPolicy[deltaInd, lambdaInd, :]; # bond policy function for a given state (delta, lambda)
-        b_array_min, b_array_max = minimum(b_array), maximum(b_array);
-        b_array_norm = (b_array .- b_array_min) ./ (b_array_max - b_array_min);
+        
+        if b_array_max == b_array_min # if all values are the same, return the value
+            b_array_norm = b_array
+        else
+            b_array_norm = (b_array .- b_array_min) ./ (b_array_max - b_array_min);
+        end
+
         b_itp = interpolate(b_array_norm, BSpline(Quadratic(Line(OnGrid()))));
         b_itp = Interpolations.scale(b_itp, nRange);
         b_itp_ext = extrapolate(b_itp, Line());
@@ -963,6 +981,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
    #     paths.ΓPrime[smallT, smallN, smallJ] = 
    # end
 end
+
 
 # after obtaining simulation paths, trim some first parts and calculate moments
 function calculate_moments(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs::VFuncs{T,S}, params::Params{T,S}, Rl::T, trim::S) where {T<:Real,S<:Integer}

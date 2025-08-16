@@ -863,14 +863,19 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         q = vFuncs.qBond[:, :, :, deltaInd, lambdaInd];
         qmin = minimum(q);
         qmax = maximum(q);
-        qnorm = (q .- qmin) ./ (qmax - qmin);
+
+        if qmin == qmax # if qBond is constant, return the constant value
+            qnorm = qmin .* ones(size(q));
+        else
+            qnorm = (q .- qmin) ./ (qmax - qmin);
+        end
+        
         q_itp_rev = interpolate(qnorm, BSpline(Quadratic(Line(OnGrid()))));
         q_itp_rev = Interpolations.scale(q_itp_rev, lRange, sRange, bRange);
         q_itp_ext_rev = extrapolate(q_itp_rev, Line());
         q_interp_rev(ll, ss, bb) = q_itp_ext_rev(ll, ss, bb);
 
         q_value = q_interp_rev(l, s, b) * (qmax - qmin) + qmin; # interpolate qBond for a given choice (l,s,b)
-        @show q_value
         return q_value
     end
 
@@ -881,18 +886,31 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         nRange = range(first(params.nGrid), last(params.nGrid), length(params.nGrid));
 
         l_array = policy.lPolicy[deltaInd, lambdaInd, :]; # loan policy function for a given state (delta, lambda)
+        @show l_array # check the loan policy function for a given state (delta, lambda)
         l_array_min, l_array_max = minimum(l_array), maximum(l_array);
-        l_array_norm = (l_array .- l_array_min) ./ (l_array_max - l_array_min);
+        if l_array_min == l_array_max # if lPolicy is constant, return the constant value
+            println("lPolicy is constant, l_array_min = ", l_array_min)
+            l_array_norm = l_array_min .* ones(length(l_array)); # normalize the loan policy function
+        else
+            println("lPolicy is not constant, l_array_min = ", l_array_min)
+            l_array_norm = (l_array .- l_array_min) ./ (l_array_max - l_array_min);
+        end
+        @show l_array_min, l_array_max, l_array_norm # check the minimum, maximum, and normalized loan policy function
         l_itp = interpolate(l_array_norm, BSpline(Quadratic(Line(OnGrid()))));
         l_itp = Interpolations.scale(l_itp, nRange);    
         l_itp_ext = extrapolate(l_itp, Line());
         l_interp(n_val) = l_itp_ext(n_val);
-        l_value = l_interp(n) * (l_array_max - l_array_min) + l_array_min; # interpolate loan policy function for a given n value
+        @show l_value = l_interp(n) * (l_array_max - l_array_min) + l_array_min; # interpolate loan policy function for a given n value
+        
 
 
         s_array = policy.sPolicy[deltaInd, lambdaInd, :]; # savings policy function for a given state (delta, lambda)
         s_array_min, s_array_max = minimum(s_array), maximum(s_array);
-        s_array_norm = (s_array .- s_array_min) ./ (s_array_max - s_array_min);
+        if s_array_min == s_array_max # if sPolicy is constant, return the constant value
+            s_array_norm = s_array_min .* ones(length(s_array))
+        else
+            s_array_norm = (s_array .- s_array_min) ./ (s_array_max - s_array_min);
+        end
         s_itp = interpolate(s_array_norm, BSpline(Quadratic(Line(OnGrid()))));
         s_itp = Interpolations.scale(s_itp, nRange);
         s_itp_ext = extrapolate(s_itp, Line());
@@ -901,7 +919,11 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
 
         b_array = policy.bPolicy[deltaInd, lambdaInd, :]; # bond policy function for a given state (delta, lambda)
         b_array_min, b_array_max = minimum(b_array), maximum(b_array);
-        b_array_norm = (b_array .- b_array_min) ./ (b_array_max - b_array_min);
+        if b_array_min == b_array_max # if bPolicy is constant, return the constant value
+            b_array_norm = b_array_min .* ones(length(b_array))
+        else
+            b_array_norm = (b_array .- b_array_min) ./ (b_array_max - b_array_min);
+        end
         b_itp = interpolate(b_array_norm, BSpline(Quadratic(Line(OnGrid()))));
         b_itp = Interpolations.scale(b_itp, nRange);
         b_itp_ext = extrapolate(b_itp, Line());
@@ -938,6 +960,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
 
     else
         paths.nSim[smallT, smallN, smallJ] = paths.nPrimeSim[smallT-1, smallN, smallJ] # 잉여금 as a embodied state 
+        @show paths.nSim[smallT, smallN, smallJ] # check the value of nSim at (smallT, smallN, smallJ)
         paths.lSim[smallT, smallN, smallJ] = lsb_interpolated(params, policy, paths.deltaIndSim[smallT, smallN, smallJ], paths.lambdaIndSim[smallT, smallN, smallJ], paths.nSim[smallT, smallN, smallJ])[1]; # loan policy function
         paths.sSim[smallT, smallN, smallJ] = lsb_interpolated(params, policy, paths.deltaIndSim[smallT, smallN, smallJ], paths.lambdaIndSim[smallT, smallN, smallJ], paths.nSim[smallT, smallN, smallJ])[2]; # savings policy function
         paths.bSim[smallT, smallN, smallJ] = lsb_interpolated(params, policy, paths.deltaIndSim[smallT, smallN, smallJ], paths.lambdaIndSim[smallT, smallN, smallJ], paths.nSim[smallT, smallN, smallJ])[3]; # bond policy function
