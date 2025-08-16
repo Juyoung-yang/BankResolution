@@ -22,6 +22,26 @@ A = ABCD(ones(3,3), 2.0)
 A.a .= 10.0
 A.a
 
+Int(2.0)
+
+using StatsBase, Distributions
+P = [0.7 0.3;
+     0.4 0.6];
+cats = [Categorical(P[i, :]) for i in 1:size(P,1)]
+s = 1
+next_s = rand(cats[s])
+P = reshape(P, 2, 2, 2)   
+P ./= sum(P) 
+items = collect(CartesianIndices(P))
+next_s = rand(items[s])
+
+w = Weights(vec(P))  
+idx = sample(items, w) 
+w = Weights(flatP)
+idx_flat = sample(1:length(flatP), w, 2*4)
+idx_flat[1]
+idx_tuple = Tuple(CartesianIndices(P)[idx_flat])[1]
+
 #######################################
 function example123(x; a, b)
     mid(x) = 2*x + 1
