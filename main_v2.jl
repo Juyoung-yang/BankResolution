@@ -8,7 +8,7 @@ pwd()
 # include("/Users/juyoungyang_kdi/BankResolution/main.jl")
 
 using JuMP, Ipopt, Interpolations, MathOptInterface, LinearAlgebra, ForwardDiff, Plots, Ipopt, Roots, Statistics
-using Profile, ProfileView, QuantEcon, StatsBase, Distributions
+using Profile, ProfileView, QuantEcon, StatsBase, Distributions, Random
 
 struct Params{T<:Real,S<:Integer}
         qd::T
@@ -24,9 +24,9 @@ struct Params{T<:Real,S<:Integer}
         σ::T
         τC::T
         z::T
-        α1::T
-        α2::T
-        α3::T
+        α1::T # DELETE
+        α2::T # DELETE
+        α3::T # DELETE
         δL::T
         δM::T
         δH::T
@@ -503,21 +503,33 @@ function qBond_condiState(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDelt
             return num/b
         end
 
-        lambdaStar_val = lambdaStar(l,s,b,Delta) # calculate lambdaStar for the given state (l,s,b,Delta)
-        return_temp_underFailure_val = ntuple(i -> return_temp_underFailure(l,s,b,Delta,params.lambdaGrid[i]), 3) # calculate return_temp_underFailure for the given state (l,s,b,Delta)
+       lambdaStar_val = lambdaStar(l,s,b,Delta) # calculate lambdaStar for the given state (l,s,b,Delta)
+       # @show return_temp_underFailure.(l,s,b,Delta,params.lambdaGrid)
+       return_temp_underFailure_val = ntuple(i -> return_temp_underFailure(l,s,b,Delta,params.lambdaGrid[i]), 3) # calculate return_temp_underFailure for the given state (l,s,b,Delta)
         qBond_temp = zeros(T, 3)
 
         if lambdaStar_val < params.λL # Fail all the time  
-            return qBond_temp .= return_temp_underFailure_val
+          #  println("1")
+            qBond_temp .= return_temp_underFailure_val
         elseif (params.λL <= lambdaStar_val) && (lambdaStar_val < params.λM)
-            return qBond_temp .= (one(T), return_temp_underFailure_val[2], return_temp_underFailure_val[3])
+           # println("2")
+            qBond_temp .= (one(T), return_temp_underFailure_val[2], return_temp_underFailure_val[3])
         elseif (params.λM <= lambdaStar_val) && (lambdaStar_val< params.λH)
-            return qBond_temp .= (one(T), one(T), return_temp_underFailure_val[3])
+           # println("3")
+            qBond_temp .= (one(T), one(T), return_temp_underFailure_val[3])
         else # No failure at all
-            return qBond_temp .= one(T)
+          #  println("4")
+            qBond_temp .= one(T)
         end
 
-        return params.β * (params.Markov_Lambda * qBond_temp)
+       # @show qBond_temp
+       # println("beta")
+       # @show params.β
+        #println("F")
+        #@show params.F
+
+
+        return params.β * (params.F * qBond_temp)
 end
 
 function qBond_specialRegime(params::Params{T,S}, vFuncsNew::VFuncsNew{T,S}, Rl::T) where {T<:Real,S<:Integer}
@@ -643,7 +655,7 @@ function solve_model_given_r(Rl::T; Params::Params{T,S}, Regime::F) where {T<:Re
     return excess_loan_supply
 end
 
-# output: equilibrium loan rate
+# (FINAL) output: equilibrium loan rate
 function solve_model(params::Params{T,S}, regime::F, a::T, b::T) where {T<:Real,S<:Integer,F<:Bool}
     
     solve_model_given_r_single = Rl -> solve_model_given_r(Rl; Params = params, Regime = regime)

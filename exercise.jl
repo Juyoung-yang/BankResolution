@@ -13,6 +13,18 @@ root = find_zero(f, (a, b), Bisection(); tol=1e-8, maxevals=100)
 root
 
 #######################################
+using QuantEcon;
+mc = QuantEcon.tauchen(2, 0.7601, 0.2, 0.0084 ) # 0.0377,  0.00748
+mc2 = QuantEcon.tauchen(2, 0.8013, 0.2, 0.00748)
+mc.p
+collect(mc.state_values)
+mc2.p
+collect(mc2.state_values)
+
+mc_ex = tauchen(2, 0.7772, 0.1, 0.0018)
+mc_ex.p
+collect(mc_ex.state_values)
+
 struct ABCD
     a::Array{Float64,2}
     b::Float64
