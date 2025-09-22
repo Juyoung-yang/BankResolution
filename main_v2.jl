@@ -467,7 +467,7 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
             maxdiffs = maximum(diffs);
 
             if mod(iter, 200) == 0
-            println("iter=", iter, ", maxdiffs=", maxdiffs); # report the iteration progress 
+            println("VFI: iter=", iter, ", maxdiffs=", maxdiffs); # report the iteration progress 
             end
 
             # 3-3. if the difference is not small enough, do the iteration again
@@ -594,7 +594,7 @@ function stationary_distribution(params::Params{T,S}, Rl::T, vFuncs::VFuncs{T,S}
 
     while iter <= maxiter && maxdiffs > tol
 
-        println("iter = ", iter, ", maxdiffs = ", maxdiffs); # report the iteration progress
+       # println("stationary_distribution: iter = ", iter, ", maxdiffs = ", maxdiffs); # report the iteration progress
         Threads.@threads for iDelta in 1:length(params.deltaGrid) # 3: number of states for Delta
          Threads.@threads for iLambda in 1:length(params.lambdaGrid)  # 3: number of states for Lambda
             Threads.@threads for iN in 1:length(params.nGrid)
@@ -610,7 +610,7 @@ function stationary_distribution(params::Params{T,S}, Rl::T, vFuncs::VFuncs{T,S}
         maxdiffs = maximum(diffs);
 
         if mod(iter, 200) == 0
-            println("iter=", iter, ", maxdiffs=", maxdiffs); # report the iteration progress 
+            println("stationary_distribution: iter=", iter, ", maxdiffs=", maxdiffs); # report the iteration progress 
         end
 
         # 3-3. if the difference is not small enough, do the iteration again
@@ -647,10 +647,10 @@ end
 ###### solving for equilibrium given parameters and regime ########
 
 function solve_model_given_r(Rl::T; Params::Params{T,S}, Regime::F) where {T<:Real,S<:Integer,F<:Bool} 
-    println("Regime is ", Regime) 
-    eq = VFI(Params, Rl, Regime, 1000, 1e-4); # run the VFI algorithm with the given parameters and regime
-    println("Regime is ", Regime) 
-    eqq = stationary_distribution(Params, Rl, eq.vFuncs, eq.vFuncsNew, eq.Iterobj_is, 1000, 1e-4); # run the stationary distribution algorithm with the given parameters and regime
+    println("solve_model_given_r: Regime is ", Regime) 
+    eq = VFI(Params, Rl, Regime, 1000, 1e-3); # run the VFI algorithm with the given parameters and regime
+    println("VFI within solve_model_given_r: Regime is ", Regime,) 
+    eqq = stationary_distribution(Params, Rl, eq.vFuncs, eq.vFuncsNew, eq.Iterobj_is, 1000, 1e-3); # run the stationary distribution algorithm with the given parameters and regime
     excess_loan_supply = aggre_loan_supply(Params, eqq.vFuncs, eqq.Iterobj_is) - Rl^(Params.ϵ)
     return excess_loan_supply
 end
@@ -659,9 +659,12 @@ end
 function solve_model(params::Params{T,S}, regime::F, a::T, b::T) where {T<:Real,S<:Integer,F<:Bool}
     
     solve_model_given_r_single = Rl -> solve_model_given_r(Rl; Params = params, Regime = regime)
-    println("Regime is ", regime) 
+    println("solve_model: Regime is ", regime) 
 
-    Rl_star = find_zero(solve_model_given_r_single, (a, b), Bisection(); tol=1e-8, maxevals=100);
+    @show solve_model_given_r_single(a) * solve_model_given_r_single(b)
+    @assert solve_model_given_r_single(a) * solve_model_given_r_single(b) < 0 "No root in interval"
+    @show solve_model_given_r_single(a) * solve_model_given_r_single(b)
+    Rl_star = find_zero(solve_model_given_r_single, (a, b), Bisection(); tol=1e-2, maxevals=1000);
     println("Rl_star", Rl_star) 
 
    # fa = solve_model_given_r_single(a)
