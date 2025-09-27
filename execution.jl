@@ -4,21 +4,79 @@ readdir()
 include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\parameters.jl");
 include("C:\\Users\\master\\Desktop\\(2025) banking regulation\\BankResolution\\main_v2.jl");
 
+include("parameters.jl");
+include("main_v2_.jl");
+include( "main_v2_250922.jl")
+
 
 # 0. set the parameters
 Random.seed!(5877);
 params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,ϵ,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
 
-# 1. solve the model under given params
-@time sol = solve_model(params,true, 0.01, 1.9);
+# 1-1. solve the model under given params: counterfactual
+@time sol = solve_model(params,true, 1.0+eps(), 2-eps()); # find Rl_star from 1.0 to 1.9 (since it is gross return)
 @show sol.Rl_star
 @show sol.eqq.vFuncsNew.Γ[:, :,1]
 @time policy_ex = Get_PolicyFuncs(params, sol.eq.Iterobj_is, sol.Rl_star); # get policy functions from the solution
-@time policy_false = Get_PolicyFuncs(params, sol_false.eq.Iterobj_is, sol_false.Rl_star); # get policy functions from the solution
 
-@time sol_false = solve_model(params,false, 0.01, 1.9);
+# 1-2. solve the model under given params: benchmark
+@time sol_false = solve_model(params,false, 1.0+eps(), 2-eps());
+@time policy_false = Get_PolicyFuncs(params, sol_false.eqq.Iterobj_is, sol_false.Rl_star); # get policy functions from the solution
 @show sol_false.Rl_star
-@show sol_false.eqq.vFuncsNew.Γ[:, :,1]
+
+# 1-1. solve the model under given params: counterfactual
+@show sol_false.eq.vFuncs.VF == sol_false.eqq.vFuncs.VF
+@show sum(sol_false.eq.vFuncs.X)
+@show typeof(sol_false.eq.Iterobj_is[1,1]), fieldnames(typeof(sol_false.eq.Iterobj_is[1,1]))
+@show typeof(sol_false.eq.Iterobj_is[1,1]), size(sol_false.eq.Iterobj_is[1,1].solution)
+@show sol_false.eq.Iterobj_is[1,1].solution[3] .> sol_false.eq.Iterobj_is[1,3].solution[3]
+@show sol_false.eq.Iterobj_is[1,1].solution[2] .> sol_false.eq.Iterobj_is[3,1].solution[2]
+
+@show fieldnames(typeof(policy_false)), size(policy_false.lPolicy)
+
+mean(policy_false.lPolicy[:, 1,:]), mean(policy_false.lPolicy[:, 2, :]), mean(policy_false.lPolicy[:, 3,:])
+mean(policy_false.failure)
+mean(policy_false.sPolicy[:, 1,:]), mean(policy_false.sPolicy[:, 2, :]), mean(policy_false.sPolicy[:, 3,:])
+mean(policy_false.bPolicy[:, 1,:]), mean(policy_false.bPolicy[:, 2, :]), mean(policy_false.bPolicy[:, 3,:])
+
+policy_false.bPolicy[:, :,2]
+NAV(l::T,s::T,b::T,lambda::T,δ::T) where {T<:Real,S<:Integer,F<:Bool} = 1.2*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b; # 순자산, net asset value 
+idel = 1; ilam = 3; inn = 1;
+NAV.(policy_false.lPolicy[idel, ilam, inn], policy_false.sPolicy[idel, ilam, inn], policy_false.bPolicy[idel, ilam, inn], params.lambdaGrid, params.deltaGrid[idel])
+1.2^params.ϵ, sol_false.Rl_star^params.ϵ, 1.0^params.ϵ
+
+aggre_loan_supply2(params, sol_false.eq.vFuncs, sol_false.eq.Iterobj_is)
+
+function plot_the_graph()
+    # optimal l 
+    A = [sol_false.eq.Iterobj_is[i,1].solution[2][1] for i in 1:3] # L
+    B = [sol_false.eq.Iterobj_is[i,1].solution[5][1] for i in 1:3] # S
+
+    # optimal b
+    pl_lowDelta = plot(A, label = "sin(x)")
+    plot!(B, label = "sin(x)", linestyle = :dash)
+
+    pl_highDelta = plot()
+    plot!() 
+
+
+    plot(pl_lowDelta, pl_highDelta, pl_lowLambda, pl_highLambda, layout = (2,2), label = ["lowDelta" "highDelta" "lowLambda" "highLambda"])
+end
+plot_the_graph()
+
+
+@show sol_false.eq.Iterobj_is[1,1].solution[2]
+@show sol_false.eq.Iterobj_is[1,3].solution[2]
+@show sol_false.eq.Iterobj_is[1].solution
+
+
+
+
+@show sol_false.eq.Iterobj_is[2].solution
+@show sol_false.eq.Iterobj_is[1].solution_index
+
+@show sol_false.eqq.vFuncsNew.Γ[:, :,2]
+@show sol_false.eqq.Iterobj_is[1]
 
 @show policy_ex.lPolicy
 @show policy_false.lPolicy
@@ -75,6 +133,10 @@ function qBond_condiState2(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDel
 end
 
 x = qBond_condiState(params, 5.77882, 1, 5, 5, 3)
+
+################################################################################################################################################
+
+
 
 ################################################################################################################################################
 
