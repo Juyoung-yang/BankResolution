@@ -174,14 +174,14 @@ function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regim
             for (iδ, δprime) in pairs(params.deltaGrid)
                 nav = NAV(l,s,b,λprime)
                 failure = nav <= zero(T)
-                @show iδ, iλ
+                # @show iδ, iλ
 
                 if failure 
-                    println("failure at (iδ, iλ): ", iδ, iλ)
+                   #  println("failure at (iδ, iλ): ", iδ, iλ)
                         n_temp = n_failure(l,λprime)
-                        V_temp[iδ, iλ] = regime ? zero(T) : (1 - params.ρ) * inter_v_temp(params, vFuncs, δprime, λprime, n_temp)
+                        V_temp[iδ, iλ] = regime ? zero(T) : params.ρ * inter_v_temp(params, vFuncs, δprime, λprime, n_temp)
                 else
-                    println("success at (iδ, iλ): ", iδ, iλ)
+                   #  println("success at (iδ, iλ): ", iδ, iλ)
                         n_temp = n_success(l,s,b,λprime)
                         V_temp[iδ, iλ] = inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
                 end
@@ -195,7 +195,8 @@ end
 function gen_EV_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::T  where {T<:Real, S<:Integer, F<:Bool} # incorporate failure array and conditional asset array to get ex-post asset array 
     
         V_temp = gen_V_temp(l,s,b,params,vFuncs, regime) # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
-        EV_conditional = dot(params.H[iDelta, :], V_temp * params.F[:, iLambda]) # the return is a scalar 
+        @show size(V_temp), size(params.H[iDelta, :]), size( params.F[iLambda,:]'), iDelta, iLambda
+        EV_conditional = dot(params.H[iDelta, :], V_temp * params.F[iLambda,:]') # the return is a scalar 
         return EV_conditional 
 end
 
@@ -699,16 +700,16 @@ function solve_model(params::Params{T,S}, regime::F, a::T, b::T) where {T<:Real,
     
     solve_model_given_r_single = Rl -> solve_model_given_r(Rl; Params = params, Regime = regime)
     println("MAIN BLOCK BEGAINS:   Regime is ", regime) 
-    @show solve_model_given_r_single(a)
-    @show solve_model_given_r_single(b)
+    # @show solve_model_given_r_single(a)
+    # @show solve_model_given_r_single(b)
     @assert solve_model_given_r_single(a) * solve_model_given_r_single(b) < 0 "No root in interval"
     
-    println("end points condition satisfied, proceeding to find root") 
+    # println("end points condition satisfied, proceeding to find root") 
     # @show A = solve_model_given_r_single(a)
     # @show B = solve_model_given_r_single(b)
     # return (A = A, B = B)
     Rl_star = find_zero(solve_model_given_r_single, (a, b), Bisection(); tol=1e-2, maxevals=1000);
-    println("Rl_star", Rl_star) 
+    # println("Rl_star", Rl_star) 
 
    # fa = solve_model_given_r_single(a)
    # fb = solve_model_given_r_single(b)
@@ -824,14 +825,22 @@ struct Params_cal{T<:Real,S<:Integer}
     bigN::S
     bigJ::S
     trim::S
+    a::T
+    b::T
     debt_to_liability::T
     capital_to_deposit::T
     loan_to_asset::T
+    cM::T
+    cO::T
+    cL::T
+    ϵ::T
+    E::T
+    dBar::T
 end
 
-function Initiate_Params_cal(bigT::S,bigN::S,bigJ::S,trim::S,debt_to_liability::T,capital_to_deposit::T,loan_to_asset::T) where {T<:Real,S<:Integer}
+function Initiate_Params_cal(bigT::S,bigN::S,bigJ::S,trim::S,a::T,b::T,debt_to_liability::T,capital_to_deposit::T,loan_to_asset::T,cM::T,cO::T,cL::T,ϵ::T,E::T,dBar::T) where {T<:Real,S<:Integer}
 
-    pam = Params_cal{T,S}(bigT,bigN,bigJ,trim,debt_to_liability,capital_to_deposit,loan_to_asset)
+    pam = Params_cal{T,S}(bigT,bigN,bigJ,trim,a,b,debt_to_liability,capital_to_deposit,loan_to_asset,cM,cO,cL,ϵ,E,dBar);
     return pam
 end
 
@@ -1167,3 +1176,99 @@ function simulate_and_moments(params::Params{T,S},params_cal::Params_cal{T,S},vF
     return (shocks = shocks, paths = paths, moments = simulation_false);
 end
 
+function solve_simulate_and_moments(params::Params{T,S},params_cal::Params_cal{T,S},regime::F) where {T<:Real,S<:Integer,F<:Bool}
+
+    # 1. solve the model
+    println("Solving the model...")
+    sol = solve_model(params, regime, params_cal.a, params_cal.b);
+    println("Solved the model.")
+    policy = Get_PolicyFuncs(params, sol.eqq.Iterobj_is, sol.Rl_star); # get policy functions from the solution
+    println("Obtained policy functions.")
+    simulation = simulate_and_moments(params,params_cal,sol.eqq.vFuncs,policy,sol.Rl_star,regime);
+    return (moments = simulation.moments, Rl_star = sol.Rl_star, sol = sol, policy = policy, simulation = simulation);
+end
+
+function calibration(params::Params{T,S},params_cal::Params_cal{T,S},regime::F) where {T<:Real,S<:Integer,F<:Bool}
+
+    target_moments = [
+        params_cal.debt_to_liability,
+        params_cal.loan_to_asset,
+        params_cal.capital_to_deposit]; #target moments from data
+
+    calibrated_params = [
+        params_cal.cM,
+        params_cal.cO,
+        params_cal.cL,
+        params_cal.ϵ,
+        params_cal.E,
+        params_cal.dBar]; #parameters to be calibrated
+
+    
+    function loss_function_given_params(Params::Params{T,S},params_cal::Params_cal{T,S},Regime::F) where {T<:Real,S<:Integer,F<:Bool}
+        
+        # update params with calibrated parameters
+        cM = params_cal.cM; 
+        cO = params_cal.cO;
+        cL = params_cal.cL;
+        ϵ = params_cal.ϵ;
+        E = params_cal.E;
+        dBar = params_cal.dBar;
+
+        params_candidate = Params{T,S}(
+            Params.β,
+            Params.Rf,
+            Params.τC,
+            Params.α,
+            Params.wr,
+            Params.g,
+            Params.ξ,
+            cM,
+            cO,
+            cL,
+            ϵ,
+            E,
+            dBar,
+            Params.deltaGrid,
+            Params.lambdaGrid,
+            Params.nGrid,
+            Params.lGrid,
+            Params.sGrid,
+            Params.bGrid,
+            Params.H,
+            Params.F
+        );
+
+        println("parameter candidates: cM = $cM cM, cO = $cO, cL = $cL, ϵ = $ϵ, E = $E, dBar = $dBar");
+        @time sol = solve_model(params_candidate, Regime, params_cal.a, params_cal.b); # solve the model with candidate parameters
+        @time policy = Get_PolicyFuncs(params_candidate, sol.eqq.Iterobj_is, sol.Rl_star); # get policy functions from the solution
+        @time sim = simulate_and_moments(params_candidate,params_cal,sol.eqq.vFuncs,policy,sol.Rl_star,Regime);
+        model_moments = sim.moments;
+
+        return sum((model_moments .- target_moments).^2)
+    end
+
+    # calibrated parameters: cM, cO, cL, ϵ, E, dBar
+    lb = zeros(length(calibrated_params)); # lower bound
+    ub = zeros(length(calibrated_params)); # upper bound
+    for i in 1:length(calibrated_params)
+        lb[i] = 0.5 * calibrated_params[i]; # 하한: 기준값의 50%
+        ub[i] = 1.5 * calibrated_params[i]; # 상한: 기준값의 150%
+    end
+
+    n_sample = 100;
+    s = SobolSeq(lb, ub);
+    skip(s, 100_000); # skip the first 100,000 points
+    x = next!(s);
+    px = hcat([next!(s) for i in 1:n_sample]...)'; # generate matrix: n_sample x length(calibrated_params)
+
+    @time Parallel_test = pmap(x->loss_function_given_params(x; Params = params, Regime = regime), px)
+    best_idx = argmin(Parallel_test);
+    best_initial = vec(px[best_idx, :]);
+    println("Best initial guess:", best_initial)
+
+    @time result = optimize(loss_function, lb, ub, best_initial, Fminbox(BFGS()))
+    println("Final estimated parameters:", Optim.minimizer(result))
+    println("Loss at optimum:", Optim.minimum(result))
+
+    return (best_loss = Parallel_test[best_idx], best_initial = best_initial, calibrated_params = result)
+end

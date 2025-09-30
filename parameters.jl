@@ -5,13 +5,13 @@ qd = 0.9827
 Rf = 0.0176 # net interest rate, whereas Rl is gross interest rate on loan 
 wr = 0.85
 α = 0.07
-ρ = 0.72
+ρ = 0.4 # calibration table의 η, 실패은행의 주가 하락률이 60%라고 가정했을 때, 1-η = 0.4
 g = 0.1816246 # 예금부채 대비 보증자산 규모
 ξ = 0.0214
 cF = 0.0
 dBar = 1.0
 σ = 0.9932
-τC = 0.2 # 0.23
+τC = 0.215 # 최근 10년 실효 법인세 평균: 21.5%
 z = 1.0
 
 γ = 1.05
