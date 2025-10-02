@@ -43,7 +43,7 @@ cL = 0.5
 E = 100.0 # loan demand shifter
 
 n_start = -10.0 # retained earning could be negative, in particular when bank doesn't fail and tax is too high 
-n_npts = 5 # 11
+n_npts = 3 # 11
 n_stop = 100.0
 l_start = eps()
 l_npts = 3 # 20

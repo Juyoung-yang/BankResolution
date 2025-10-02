@@ -5,7 +5,7 @@ bigJ = 100
 trim = 10
 
 # for boundary of root finding
-a = 1.0+eps()
+a = 0.0+eps()
 b = 2.0-eps()
 
 # target moment 
@@ -18,5 +18,5 @@ cM = 1.3e-5
 cO = 0.2
 cL = 0.5
 ϵ = -0.5 # loan demand elasticity, 1.1 for April
-E = 100.0 # loan demand shifter
+E = 200.0 # loan demand shifter
 dBar = 1.0
