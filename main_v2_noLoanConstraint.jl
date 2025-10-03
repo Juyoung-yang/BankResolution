@@ -157,6 +157,9 @@ function Initiate_MatrixIterObj_i(params::Params{T,S}) where {T<:Real,S<:Integer
         return IterObj_is; # return a vector {IterObj_iy[iy]} s.t. a vector of (delta, lambda)-contingent struct IterObj_iy
 end
 
+psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)
+
+#=
 function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T  where {T<:Real, S<:Integer}
         nRange = range(params.nGrid[1], stop = params.nGrid[end], length = length(params.nGrid)) # ex) 0:0.5:2
         lambdaRange = params.lambdaGrid
@@ -230,7 +233,7 @@ function n_success(l::T,s::T,b::T,lambda::T)::T where {T<:Real}
         return NAV(l,s,b,lambda) - tax(l,s,b,lambda) # next period asset conditional on bank success 
 end
 
-psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)
+
 
 function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::Array{T,2}  where {T<:Real, S<:Integer, F<:Bool} # generate interpolated value of V (evaluated value functions) at (delta prime, lambda prime) when choosing l,s,b
         V_temp = Array{T}(undef, length(params.deltaGrid), length(params.lambdaGrid))  
@@ -254,6 +257,7 @@ function gen_V_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regim
 
         return V_temp # [nDelta, nLambda] object 
 end
+=#
 
 function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, Rl::T, iterObj_i::IterObj_i{T,S}, iDelta::S, iLambda::S, regime::F) where {T<:Real, S<:Integer, F<:Bool}
         δ = params.deltaGrid[iDelta]; # get the state for Delta
@@ -305,7 +309,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
 
                     if failure 
                         n_temp = n_failure(l,λprime)
-                        V_temp[iδ, iλ] = regime ? zero(T) : (1 - params.ρ) * inter_v_temp(params, vFuncs, δprime, λprime, n_temp)
+                        V_temp[iδ, iλ] = regime ? zero(T) : params.ρ * inter_v_temp(params, vFuncs, δprime, λprime, n_temp) # \rho is failure panelty parameter 
                     else
                         n_temp = n_success(l,s,b,λprime)
                         V_temp[iδ, iλ] = inter_v_temp(params,vFuncs,δprime,λprime,n_temp) # interpolating v at (delta, lambda, n(iLambda))
@@ -319,7 +323,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
         # 1-2) multiply by transition matrix to get EV \in R: gen_EV_temp function 
         function gen_EV_temp(l::T,s::T,b::T,params::Params{T,S},vFuncs::VFuncs{T,S},regime::F)::T # incorporate failure array and conditional asset array to get ex-post asset array 
             V_temp = gen_V_temp(l,s,b,params,vFuncs, regime) # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
-            EV_conditional = dot(params.H[iDelta, :], V_temp * params.F[:, iLambda]) # the return is a scalar 
+            EV_conditional = dot(params.H[iDelta, :], V_temp * params.F[iLambda, :]) # the return is a scalar, expectation given current state (iDelta, iLambda)
             return EV_conditional # expected value 
         end
 
@@ -596,13 +600,13 @@ function Update_stationary_dist(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncs
 
     # 2. assigning mass weight 
     if searchsortedlast(params.nGrid, nPrime) == 0 # if n is smaller than the minimum nGrid
-        vFuncsNew.Γ[:, iLambdaPrime, 1] .+= params.H[iDelta, :] .* vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambdaPrime,iLambda]
+        vFuncsNew.Γ[:, iLambdaPrime, 1] .+= params.H[iDelta, :] .* vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambda, iLambdaPrime]
     elseif searchsortedlast(params.nGrid, nPrime) == length(params.nGrid) # if n is larger than the maximum nGrid
-        vFuncs.Γ[:, iLambda, length(params.nGrid)] .+= params.H[iDelta, :] .* vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambdaPrime,iLambda]
+        vFuncs.Γ[:, iLambda, length(params.nGrid)] .+= params.H[iDelta, :] .* vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambda, iLambdaPrime]
     else # set in between
         iNn, iNnPrime = searchsortedlast(params.nGrid, nPrime), searchsortedfirst(params.nGrid, nPrime)
-        vFuncsNew.Γ[:,iLambdaPrime,iNnPrime] .+= params.H[iDelta, :] .* ((nPrime - params.nGrid[iNn]) / (params.nGrid[iNnPrime] - params.nGrid[iNn])) * vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambdaPrime,iLambda]
-        vFuncsNew.Γ[:,iLambdaPrime,iNn] .+= params.H[iDelta, :] .* ((params.nGrid[iNnPrime] - nPrime) / (params.nGrid[iNnPrime] - params.nGrid[iNn])) * vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambdaPrime,iLambda]
+        vFuncsNew.Γ[:,iLambdaPrime,iNnPrime] .+= params.H[iDelta, :] .* ((nPrime - params.nGrid[iNn]) / (params.nGrid[iNnPrime] - params.nGrid[iNn])) * vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambda, iLambdaPrime]
+        vFuncsNew.Γ[:,iLambdaPrime,iNn] .+= params.H[iDelta, :] .* ((params.nGrid[iNnPrime] - nPrime) / (params.nGrid[iNnPrime] - params.nGrid[iNn])) * vFuncs.Γ[iDelta, iLambda, iN] .* params.F[iLambda, iLambdaPrime]
     end
 
 end
@@ -1272,3 +1276,4 @@ function calibration(params::Params{T,S},params_cal::Params_cal{T,S},regime::F) 
 
     return (best_loss = Parallel_test[best_idx], best_initial = best_initial, calibrated_params = result)
 end
+
