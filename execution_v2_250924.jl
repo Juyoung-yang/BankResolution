@@ -2,14 +2,11 @@ pwd()
 readdir()
 
 include("parameters.jl");
-include("parameters_calib.jl");
+include("parameters_calib.jl")
 include("main_v2_250922.jl");
 
-params_cal = Initiate_Params_cal(bigT,bigN,bigJ,trim,a,b,debt_to_liability,capital_to_deposit,loan_to_asset);
-target_moments = [params_cal.debt_to_liability, params_cal.loan_to_asset, params_cal.capital_to_deposit];   
-target_moments  
-
-using LaTeXStrings
+using Distributed
+addprocs(4) 
 
 Random.seed!(5877);
 
@@ -24,11 +21,7 @@ cO = 0.2
 params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
 params_cal = Initiate_Params_cal(bigT,bigN,bigJ,trim,debt_to_liability,capital_to_deposit,loan_to_asset)
 
-shocks = makeShockSequence(params, vFuncs, 100, 10, 100);
-paths_false = Initiate_Paths(shocks, params);
-paths_true = Initiate_Paths(shocks, params);
-
-@time eq = VFI(params, 1.04, true, 1000, 1e-2)
+@time eq = VFI(params, 1.04, true, 1000, 1e-2);
 @time eqq = stationary_distribution(params, 1.04, eq.vFuncs, eq.vFuncsNew, eq.Iterobj_is, 1000, 1e-4);
 @time eqqq = solve_model_given_r2(1.04; Params = params, Regime = true)
 @time policyyy = Get_PolicyFuncs(params, eq.Iterobj_is, 1.04); # get policy functions from the solution
@@ -64,6 +57,9 @@ plot(eq.vFuncs.qBond[:,1,10,1,2])
 plot!(eq.vFuncs.qBond[:,1,10,2,2])
 plot!(eq.vFuncs.qBond[:,1,10,3,2])
 
+@time eq_false = VFI(params, 1.4, false, 1000, 1e-2);
+eq_false.vFuncs.qBond
+
 #=
 @time eq = VFI(params, 1.4, false, 1000, 1e-2);
 @time eqq = stationary_distribution(params, 1.4, eq.vFuncs, eq.vFuncsNew, eq.Iterobj_is, 1000, 1e-2); # run the stationary distribution algorithm with the given parameters and regime
@@ -88,17 +84,12 @@ plot!(sol_true.eq.vFuncs.qBond[:,1,2,1,1])
 plot!(sol_true.eq.vFuncs.qBond[:,1,3,1,1])
 
 include("main_v2_250922.jl");
-@time eq111 = VFI(params, 1.04, true, 1000, 1e-2)
-@time eq222 = VFI(params, 1.04, false, 1000, 1e-2)
-
-
-
 endT = Int(params_cal.bigT - 3);
 @time sol_false = solve_model(params, false, 1.0+eps(), 2-eps());
 @time policy_false = Get_PolicyFuncs(params, sol_false.eqq.Iterobj_is, sol_false.Rl_star); # get policy functions from the solution
 @time sim_false = simulate_and_moments(params,params_cal,sol_false.eq.vFuncs,policy_false,sol_false.Rl_star,false)
-sol_false.eq.vFuncs.Γ
 sol_false.Rl_star
+sol_false.eq.vFuncs.Γ
 policy_false.lPolicy
 policy_false.failure
 aggre_loan_supply2(params, sol_false.eqq.vFuncs, sol_false.eqq.Iterobj_is)
@@ -108,6 +99,9 @@ sim_false.paths.capitalToDeposit[:,:,1]
 sim_false.paths.nPrimeSim
 sim_false.moments
 mean(sim_false.paths.debtToLiability[:, :, trim:endT])
+
+include("main_v2_250922.jl");
+@time x = calibration(params, params_cal, false, 1.0+eps(), 2-eps())
 
 
 @time simulation_false = Simulate_paths(paths_false, policy_false, sol_false.eqq.vFuncs, params, sol_false.Rl_star, 10)
@@ -163,46 +157,39 @@ sum(sol_false.eq.vFuncs.Γ[:,1,:]), sum(sol_false.eq.vFuncs.Γ[:,2,:]), sum(sol_
 aggre_loan_supply2(params, sol_false.eqq.vFuncs, sol_false.eqq.Iterobj_is)
 ##############################################################################
 
+function graph2()
+    theme(:bright) # theme(:ggplot2)
+    plot(params.bGrid[7:15]./(params.lGrid[10]+params.sGrid[10]), eq.vFuncs.qBond[1,19,7:15,2,1], label ="low loan-to-safe asset", legend =:bottomleft, legendfontsize = 12, guidefontsize = 12, lw = 3, xlabel = "Bank debt/ total asset", ylabel = "Debt price")
+    plot!(params.bGrid[7:15]./(params.lGrid[15]+params.sGrid[5]), eq.vFuncs.qBond[19,1,7:15,2,1], label ="high loan-to-safe asset", lw = 3)
+    plot!(params.bGrid[7:15]./(params.lGrid[10]+params.sGrid[10]), eq_false.vFuncs.qBond[1,1,1,1,1] .*ones(size(eq.vFuncs.qBond[10,10,7:15,2,3])), label ="benchmark", ls =:dash, lw = 3)
+    savefig("plot_highres2.pdf")
+end
 
-#=
+function graph1()
+    theme(:bright) # theme(:ggplot2)
+    plot(params.bGrid[7:15]./(params.lGrid[10]+params.sGrid[10]),eq.vFuncs.qBond[10,10,7:15,2,1], label ="low λ", lw = 3)
+    plot!(params.bGrid[7:15]./(params.lGrid[10]+params.sGrid[10]),eq.vFuncs.qBond[10,10,7:15,2,3], label ="high λ", lw = 3)
+    plot!(params.bGrid[7:15]./(params.lGrid[10]+params.sGrid[10]), eq_false.vFuncs.qBond[1,1,1,1,1] .*ones(size(eq.vFuncs.qBond[10,10,7:15,2,3])), label ="benchmark", ls =:dash, lw = 3)
+    savefig("plot_highres.pdf")
+end
+
+
+
 
 solve_model_given_r_single = Rl -> solve_model_given_r(Rl; Params = params, Regime = regime)
 
 
-
+#=
 @time A = solve_model_given_r2(1.0 + eps(); Params = params, Regime = false)
 @time B = solve_model_given_r2(2.0 - eps(); Params = params, Regime = false)
 @show params.ϵ, params.E
 
-=# 
 
-cL = 0.3;
-params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
-@show params.cL
+ϵ = -0.0001
+params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params.ϵ, params.E
 
-@time A_lowCL = solve_simulate_and_moments(params, params_cal, false, 1.0 + eps(), 2.0 - eps());
-@show A_lowCL.moments, A_lowCL.Rl_star
-
-cL = 0.7;
-params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
-@show params.cL
-
-@time A_highCL = solve_simulate_and_moments(params, params_cal, false, 1.0 + eps(), 2.0 - eps());
-@show A_highCL.moments, A_highCL.Rl_star
-
-cL = 0.5; cO = 0.01;
-params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
-@show params.cO, params.cL
-@time A_lowCO = solve_simulate_and_moments(params, params_cal, false, 1.0 + eps(), 2.0 - eps());
-@show A_lowCO.moments, A_lowCO.Rl_star
-
-cL = 0.5; cO = 0.5;
-params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
-@show params.cO, params.cL
-@time A_highCO = solve_simulate_and_moments(params, params_cal, false, 1.0 + eps(), 2.0 - eps());
-@show A_highCO.moments, A_highCO.Rl_star
-
-#=
+@show A_lowEpsilon = solve_model_given_r2(1.0 + eps(); Params = params, Regime = false)
 @show B_lowEpsilon = solve_model_given_r2(2.0 - eps(); Params = params, Regime = false)
 
 ϵ = -0.5; E = 150.0;

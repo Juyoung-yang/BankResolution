@@ -3,12 +3,12 @@
 qd = 0.9827
 β = 0.9827
 Rf = 0.0176 # net interest rate, whereas Rl is gross interest rate on loan 
-wr = 0.85
-α = 0.07
+wr = 0.428
+α = 0.08
 ρ = 0.4 # 은행 실패시의 패널티, calibration table의 η, 실패은행의 주가 하락률이 60%라고 가정했을 때, 1-η = 0.4
 g = 0.1816246 # 예금부채 대비 보증자산 규모
 ξ = 0.0214
-cF = 0.0
+cF = 0.0 # DELETE
 dBar = 1.0
 σ = 0.9932
 τC = 0.215 # 최근 10년 실효 법인세 평균: 21.5%
@@ -37,10 +37,9 @@ M = 1.0 # 정책변수: number of banks
 
 ## calibrated parameter ##
 cM = 1.3e-5
-cO = 0.0 # no operation cost; # 0.2
-cL = 0.1 # let operation cost for deposit being very small; 
-# cL originally 0.5; with 0.5, optimization does not converge
-ϵ = -1.1 # loan demand elasticity, - 1.1 for April
+cO = 0.2
+cL = 0.5
+ϵ = -0.5 # loan demand elasticity, 1.1 for April
 E = 100.0 # loan demand shifter
 
 n_start = -10.0 # retained earning could be negative, in particular when bank doesn't fail and tax is too high 

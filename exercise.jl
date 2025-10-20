@@ -7,10 +7,38 @@ using ForwardDiff
 using Roots
 import Pkg; Pkg.add("Roots")
 
+
+
+A =  [ 1,2,3,4,5]
+B = [0,1,1,0,0]
+
+@show C = A .* B
+
+n = count(!iszero, C)
+s = sum(C)
+
+s/n
+
+
+
+
 f(x) = x^3 - 2x - 5
 a, b = 2.0, 3.0
 root = find_zero(f, (a, b), Bisection(); tol=1e-8, maxevals=100)
 root
+
+include("parameters.jl");
+sum(F[1,:]), @show size(F[1,:])
+@show dot(H[1,:], A * F[1,:])
+@show sum(H[1,:]), sum(F[1,:])
+A = [1 0 0; 0 1 0; 0 0 1]
+A * F[1,:]
+y = [5,11]
+x = [2 2; 20 20]
+A * x
+A * x[:,1]
+@show size(A), size(y), size(x)
+@show dot(y, A * x')
 
 #######################################
 using QuantEcon;
