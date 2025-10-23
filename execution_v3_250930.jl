@@ -13,7 +13,7 @@ include("main_v2_noLoanConstraint.jl");
 #####################################################################################################################
 
 
-params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
 # @show params.nGrid, params.lGrid, params.sGrid, params.bGrid
 
 # b = 1.3+eps()
@@ -50,13 +50,410 @@ using Sobol, Distributions, Distributed
 cM = 1.3e-5;
 cO = 0.1;
 cL = 0.1;
-E = 170.0;
-dBar = 1.0;
+E = 210.0;
+dBar = 1.0e-100;
+
 
 params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
 @show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
 @time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+# 예대율 있을 때
 ex.moments
+# 예대율 없을 때
+ex.moments
+# 예대율 규제 조정하고 신주발행 비용 증가: 대출은 증가하였지만 여전히 실패가 너무 많이 발생; 비용 증가는 배당금 지급 축소에 크게 영향을 미치지 않음
+ex.moments
+# 이자율을 맞추기 위해 대출수요를 줄이자
+E = 150.0
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 여전히 대출 금리가 높아서 수요를 더 줄여야 
+E = 130.0
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+ex.paths.nPrimeSim[params_cal.trim:20, 1, 1]
+ex.paths.deltaSim[params_cal.trim:20, 1, 1]
+ex.paths.lSim[params_cal.trim:20, 1, 1]
+ex.paths.bSim[params_cal.trim:20, 1, 1]
+ex.paths.divSim[params_cal.trim:20, 1, 1]
+# 예대율 규제를 더욱 완화해보기 -> 은행 실패가 25%로 일어나고 (즉, 어느정도는 대출 규모가 있어야) 
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+E = 150.0
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+ex.paths.nPrimeSim[params_cal.trim:20, 1, 1] ./ ex.paths.deltaSim[params_cal.trim:20, 1, 1]
+ex.paths.failureSim[params_cal.trim:20, 1, 1]
+mean(ex.paths.nPrimeSim[params_cal.trim:80, :, :] ./ ex.paths.deltaSim[params_cal.trim:80, :, :])
+# 아직 자기자본이 살짝 높음, 25% 은행 실패는 모델의 lambda shock 이 엄청 크기 때문 
+# 증자와 자기자본을 좀 줄여보자, 증자 cost를 높여보자 
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 유동성 cost를 negative로 해서 debtToLiability를 낮춰보자 
+cL = -0.2
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# deposit으로 fund rasing 하는게 오히려 이득이니 dividend가 positive로 나오기 시작! Good
+mean(ex.paths.nPrimeSim[params_cal.trim:80, :, :] ./ ex.paths.deltaSim[params_cal.trim:80, :, :])
+# 자기자본도 꽤나 낮음 great!
+# 이제 debt to liability을 낮추고 (혹은 debt을 낮추고), loan to asset을 높이고 (save asset 투자를 줄이고) 
+cM = 1.3e-7
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+mean(ex.paths.sSim[params_cal.trim:80, :, :] ./ ex.paths.deltaSim[params_cal.trim:80, :, :])
+mean(ex.paths.bSim[params_cal.trim:80, :, :] ./ ex.paths.deltaSim[params_cal.trim:80, :, :])
+mean(ex.paths.lSim[params_cal.trim:80, :, :] ./ ex.paths.deltaSim[params_cal.trim:80, :, :])
+# 예금이자율을 80% 수준으로 낮추고 (혹은 유동성 비용을 더 낮추고), 대출을 늘리기 위해 loan cost을 낮추자
+##### 다시 배당금이 양수인 parameter를 찾자 
+cL = -0.25;
+cM = 1.3e-5;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 다시 배당금이 양수인 parameter를 찾자 
+dBar = 1.0e-100;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# dBar를 조정해도 그닥 효과는 없음..
+# 배당금은 양수이고 크기고 작지만, loan이 작고 debt은 큼
+dBar = 1.0;
+cL = -0.25;
+cO = 0.01;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# what if very high operation cost?
+cO = 10.0;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+cO = 100.0;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 오히려 operation cost를 낮춰보자 -> div이 양수가 될 것 
+cO = 0.001;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 신주발행 곡률 높이기: 2.0 에서 2.5로
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 현실적인 이자율을 위해 demand 낮추기
+E = 110.0
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments 
+E = 145.0
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# parameters: cL, cO, cM, E, div params (dBar, sigma, square)
+# target moments: 4개 <- E, square + alpha 2 개
+@time ex_true = solve_simulate_and_moments(params_ex, params_cal, true);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+dBar = 100000000.0;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+
+
+dBar = 1.0e-10;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+
+dBar = 1.0;
+E = 200.0;
+cM = 1.0e-2;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# cM 을 너무 높여버리니 capital 은 줄어들었는데 loan은 증가하고 bank failure를 안함 
+
+dBar = 1.0;
+E = 200.0;
+σ = 0.5
+cM = 1.0e-2;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+ex.moments
+
+
+
+σ = 0.01;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 배당금 곡률을 바꾼다 한들 크게 moment가 변하지 않음
+
+dBar = 500.0;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+
+cM = 1.0e-5;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+cM = 5.0e-4;
+σ = 0.9932 # (KEEP IT FIXED) 
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+cM = 1.0e-5;
+σ = 0.9932 # (KEEP IT FIXED) 
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+
+
+
+
+cL = 0.3;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# bamk fail 이 계속 안나오네 
+
+
+cM = 1.3e-5;
+cO = 0.1;
+cL = 0.1;
+E = 200.0;
+dBar = 1000.0;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+# 바로  bank failure 가 일어남 
+
+cM = 1.3e-5;
+cO = 0.1;
+cL = 0.1;
+E = 200.0;
+dBar = 10.0;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+cM = 1.3e-5;
+cO = 0.1;
+cL = 0.1;
+E = 200.0;
+dBar = 1.0;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+cM = 1.3e-5;
+cO = 0.1;
+cL = 0.1;
+E = 200.0;
+dBar = 1.0e-3;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+
+# liquidity cost 를 높여보자 
+cM = 1.3e-5;
+cO = 0.1;
+cL = 0.4;
+E = 200.0;
+dBar = 1.0e-3;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+
+# operation cost를 높여보자 
+cM = 1.3e-5;
+cO = 10.0;
+cL = 0.1;
+E = 200.0;
+dBar = 1.0e-3;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+# moderate operation cost 
+cM = 1.3e-5;
+cO = 1.0;
+cL = 0.1;
+E = 200.0;
+dBar = 1.0e-3;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+endT =  Int(ex.paths.bigT - 3)
+mean(ex.paths.sSim[trim:endT, :, :])
+
+mean(ex.paths.lSim[trim:endT, :, :])
+
+mean(ex.paths.bSim[trim:endT, :, :])
+
+mean(ex.paths.deltaSim[trim:endT, :, :])
+
+mean(ex.paths.divSim[trim:endT, :, :])
+mean(ex.paths.capitalToDeposit[trim:endT, :, :])
+mean(ex.paths.failureSim[trim:endT, :, :])
+
+mean(ex.paths.sSim[trim:endT, :, :])/mean(ex.paths.assetSim[trim:endT, :, :])
+mean(ex.paths.bSim[trim:endT, :, :])/mean(ex.paths.liabilitySim[trim:endT, :, :])
+mean(ex.paths.deltaSim[trim:endT, :, :])/mean(ex.paths.lSim[trim:endT, :, :])
+mean(ex.paths.lSim[trim:endT, :, :] ./ ex.paths.deltaSim[trim:endT, :, :])
+
+ex.paths.lSim[trim:endT, 1, 1]
+ex.paths.deltaSim[trim:endT, 1, 1]
+
+params_ex.dBar
+psi(params::Params, d) = d >= 0 ? (d + 0.001)^params.σ  - 0.001^params.σ : 1 - exp(-d);
+psi2(params::Params, d) = d >= 0 ? (d + 0.0000000000001)^params.σ  - 0.0000000000001^params.σ : 1 - exp(-d)^5;
+psi_ex(d) = d >= 0 ? (d+1.0)^0.9 - 1.0^0.9 : 1-exp(-d)^1.0
+xx = 1.0e-100
+yy = 0.9
+zz = 1.1
+psi_ex2(d) = d >= 0 ? (d+xx)^yy - xx^yy : 1-exp(-d)^zz
+
+plot(-10:1:10, a -> psi_ex(a))
+plot!(-10:1:10, a -> psi_ex(a))
+
+@show psi_ex.(-10:1:10)'
+@show psi_ex2.(-10:1:10)'
+@show psi_ex2.(-10:1:10)'
+@show psi_ex2.(-10:1:10)'
+
+
+
+
+plot(-7:1:10, y -> psi(params_ex,y))
+
+plot!(-7:1:10, y -> psi2(params_ex,y))
+
+cM = 1.3e-5;
+cO = 1.0;
+cL = 0.1;
+E = 200.0;
+dBar = 1.0e-3;
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar, params_ex.σ
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+ex.moments
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

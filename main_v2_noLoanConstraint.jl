@@ -159,7 +159,7 @@ end
 
 
 #######################################################################################
-psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d);
+psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)^2.5; # 1.2
 # psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 0.0;
 #=
 function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T  where {T<:Real, S<:Integer}
@@ -169,6 +169,7 @@ function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda:
         vfVals = [vFuncs.VF[iDelta, iLambda, iN] for iN in eachindex(nRange), iLambda in eachindex(lambdaRange), iDelta in eachindex(deltaRange)] # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
         itp = interpolate((nRange, lambdaRange, deltaRange), vfVals, Gridded(Linear())) # , BSpline(Cubic(Line(OnGrid())))
         itp_ext = extrapolate(itp, Line())
+        
         return itp_ext(n, lambda, delta)
 end
 
@@ -354,9 +355,9 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
             Gmin = minimum(G)
             Gmax = maximum(G)
             Gnorm = (G .- Gmin) ./ max(Gmax - Gmin, eps(T)) # scaling 
-            G_itp_rev = interpolate(Gnorm, BSpline(Cubic(Line(OnGrid()))))
+            G_itp_rev = interpolate(Gnorm, BSpline(Linear())) # , BSpline(Cubic(Line(OnGrid())))
             G_itp_rev = Interpolations.scale(G_itp_rev, lRange, sRange, bRange)
-            G_itp_ext_rev = extrapolate(G_itp_rev, Line())
+            G_itp_ext_rev = extrapolate(G_itp_rev, Flat()) # , Line()
             G_interp_rev(l, s, b) = G_itp_ext_rev(l, s, b)
     
             model = Model(Ipopt.Optimizer)
@@ -377,31 +378,51 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
            # set_optimizer_attribute(model, "max_wall_time", 150.0) # 시간 방어막: iteration_limit 대신 acceptable로 떨어지게 유도
             set_optimizer_attribute(model, "print_options_documentation", "yes")
 
-            JuMP.register(model, :G_interp_rev, 3, G_interp_rev; autodiff = true)
             l_min, l_max = first(params.lGrid), last(params.deltaGrid) # (last(params.lGrid)+first(params.lGrid))/2, last(params.lGrid)
             s_min, s_max = first(params.sGrid), last(params.sGrid)
             b_min, b_max = first(params.bGrid), last(params.bGrid)
             ## alternative constraints: 예대율 규제
             # l_cap = min(l_max, (params.β - params.g) * params.deltaGrid[iDelta]) # l_start = (l_max+l_min)/2
+            l_cap = min(l_max, 2.0 * params.deltaGrid[iDelta]) # l_start = (l_max+l_min)/2
+
             # b_cap = min(b_max, (1 - params.α * params.wr) * l_max + s_max - (1 - params.g) * params.deltaGrid[iDelta]) # b_start = (b_max+b_min)/2
 
             # start: warm-start 있으면 사용, 없으면 중앙값
-            l0 = warm_start === nothing ? (l_min + l_max)/2 : warm_start[1] # 예대율 규제가 없을 때
-            # l0 = warm_start === nothing ? (l_min + l_cap)/2 : warm_start[1] # 예대율 규제가 들어갈 때
+           #  l0 = warm_start === nothing ? (l_min + l_max)/2 : warm_start[1] # 예대율 규제가 없을 때
+             l0 = warm_start === nothing ? (l_min + l_cap)/2 : warm_start[1] # 예대율 규제가 들어갈 때
             s0 = warm_start === nothing ? (s_min + s_max)/2 : warm_start[2]
            #  b0 = warm_start === nothing ? (b_min + b_cap)/2 : warm_start[3]
             b0 = warm_start === nothing ? (b_min + b_max)/2 : warm_start[3]
 
+            
+            function G_interp_rev_safe(l, s, b)
+               l_safe = clamp(l, l_min, l_cap) # 예대율 규제가 들어갈 때
+             #   l_safe = clamp(l, l_min, l_max) # 예대율 규제가 없을 때
+                s_safe = clamp(s, s_min, s_max)
+                b_safe = clamp(b, b_min, b_max)
+                return G_itp_ext_rev(l_safe, s_safe, b_safe)
+            end
+
+            JuMP.register(model, :G_interp_rev, 3, G_interp_rev_safe; autodiff = true)
+
             # println("c1 residual = ", (1-params.α*params.wr)*l_start + s_start - b_start - (1-params.g)*params.deltaGrid[iDelta])
             # println("c2 residual = ", l_start - (params.β - params.g)*params.deltaGrid[iDelta])
-            @variable(model, l_min <= l <= l_max, start = clamp(l0, l_min, l_max)) # 예대율 규제가 없을 때
-            # @variable(model, l_min <= l <= l_cap, start = clamp(l0, l_min, l_cap)) # 예대율 규제가 들어갈 때
+          #  @variable(model, l_min <= l <= l_max, start = clamp(l0, l_min, l_max)) # 예대율 규제가 없을 때
+            @variable(model, l_min <= l <= l_cap, start = clamp(l0, l_min, l_cap)) # 예대율 규제가 들어갈 때
             @variable(model, s_min <= s <= s_max, start = clamp(s0, s_min, s_max))
             @variable(model, b_min <= b <= b_max, start = clamp(b0, b_min, b_max))
             # println("G_interp at start = ", G_interp_rev(l_start, s_start, b_start))
             # grad = ForwardDiff.gradient(u -> G_interp_rev(u[1], u[2], u[3]), [l_start, s_start, b_start])
             # println("gradient at start = ", grad)
     
+            if any(isnan, G) || any(isinf, G)
+                @warn "NaN or Inf detected in G at iDelta=$iDelta, iLambda=$iLambda, iN=$iN"
+            end
+
+            if !all(isfinite, [params.α, params.β, Rl])
+                @warn "Non-finite parameter detected: α=$(params.α), β=$(params.β), Rl=$Rl"
+            end
+
             @NLobjective(model, Max, G_interp_rev(l, s, b))
             @constraint(model, (1-params.α*params.wr)*l + s - b >= (1-params.g)*params.deltaGrid[iDelta]) # constratint 1
            # @constraint(model, l <= (params.β - params.g)*params.deltaGrid[iDelta]) # constratint 2
@@ -422,6 +443,11 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
             # 안전장치: 제약 위반이 작으면 '사실상 해'로 채택 (임계치는 필요시 조정)
             # 간단 체크 예시 (정밀 필요시 제약 잔차 직접 계산)
                 return (value(l), value(s), value(b))
+            elseif termination_status(model) == MathOptInterface.NUMERICAL_ERROR
+                @warn "Numerical error detected."
+                @info "Values at failure:" l=value(l) s=value(s) b=value(b)
+                @show l_min, l_max, s_min, s_max, b_min, b_max
+                @info "Objective value:" obj=objective_value(model)
             else
                 error("Optimization did not converge: status=$stat, primal=$(primal_status(model))")
             end
@@ -452,8 +478,8 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
     
             # G above will be feeded into solve_bank_problem for interpolating v at (l,s,b) and then solve for (l,s,b)
             sol = solve_bank_problem(params, vFuncs, iDelta, iLambda, iN, G); # find the solution, a vector with 3 elements (l,s,b)
-            # @show sol
             iterObj_i.solution[iN] .= sol; # store the solution in iterObj_i.solution
+
             iterObj_i.failure[iN] = [NAV(sol[1], sol[2], sol[3], lamPrime) < 0 for lamPrime in params.lambdaGrid] # if true, bank fails 
             vFuncsNew.VF[iDelta, iLambda, iN] = update_VF_with_solution(sol,params,vFuncs,regime,n)
         end
@@ -1017,6 +1043,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
     n_success(l::T,s::T,b::T,lambda::T,δ::T)::T = NAV(l,s,b,lambda,δ) - tax(l,s,b,lambda,δ); # next period asset conditional on bank success 
     n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l; # next period asset conditional on bank failure 
     govGuarantedSpending(lambda::T, δ::T)::T = Rl * (lambda + params.ξ) * params.g * δ; 
+
     ### government spending for regime == true 
     # bHat_true(delta::T,lambda::T,l::T,s::T,b::T)::T =  # Rl*[(1-lambda)*l + params.g*delta] + (1+params.Rf)*s - delta; # when the bank survives, the amount of liability that needs to be bailed out by the government
     # vLenderB_true(delta::T,lambda::T,l::T,s::T,b::T)::T = 
@@ -1115,7 +1142,8 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
     paths.deltaSim[smallT, smallJ, smallN] = delta;
     paths.lambdaSim[smallT, smallJ, smallN] = lambda;
 
-    # 2. at (smallT, smallN, smallJ), calculate choice variables (l,s,b) and dividend (div), asset, failure, next period asset (nPrime)
+    # 2. at (smallT, smallN, smallJ), calculate choice variables (l,s,b) 
+    # and the consequential market variables: dividend (div), asset, failure, next period asset (nPrime)
     if smallT == 1 # initial period 
         paths.nSim[smallT, smallJ, smallN] = params.nGrid[paths.nInitialIndSim[smallJ, smallN]]; ##### start with first grid n point
         paths.nIndSim[smallT, smallJ, smallN] = paths.nInitialIndSim[smallJ, smallN]; # index of nSim at (smallT, smallN, smallJ)
@@ -1131,7 +1159,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         paths.qBondSim[smallT, smallJ, smallN] = qBond_interpolated(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], params, vFuncs); # bond price under the choice of (l,s,b) at state (delta, lambda), current period
         paths.leverageSim[smallT, smallJ, smallN] = paths.liabilitySim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # leverage ratio, current period
         paths.debtToLiability[smallT, smallJ, smallN] = paths.bSim[smallT, smallJ, smallN] / paths.liabilitySim[smallT, smallJ, smallN];
-        paths.loanToAsset[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN];
+        paths.loanToAsset[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # 
 
         if paths.failureSim[smallT, smallJ, smallN] == 1 # if failure
             paths.nPrimeSim[smallT, smallJ, smallN] = n_failure(paths.lSim[smallT, smallJ, smallN], lambdaPrime); # next period asset conditional on bank failure 
@@ -1177,24 +1205,9 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         else
             paths.govSpendingSim[smallT, smallJ, smallN] = govGuarantedSpending(lambdaPrime, delta); # no government spending for bank bailout
         end
-            paths.capitalToDeposit[smallT, smallJ, smallN] = (1-paths.failureSim[smallT, smallJ, smallN])*paths.nPrimeSim[smallT, smallJ, smallN]/delta;
-
     end
 
 end
-
-
-
-    # return paths; # return the updated paths
-
-    # 3. at (smallT, smallN, smallJ), calculate Γ and ΓPrime
-   # if smallT == 1 
-    #    paths.Γ[smallT, smallN, smallJ] = 
-    #    paths.ΓPrime[smallT, smallN, smallJ] = 
-   # else
-   #     paths.Γ[smallT, smallN, smallJ] = paths.ΓPrime[smallT-1, smallN, smallJ]
-   #     paths.ΓPrime[smallT, smallN, smallJ] = 
-
 
 
 # after obtaining simulation paths, trim some first parts and calculate moments
@@ -1248,8 +1261,8 @@ function calculate_moments(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFunc
     loanToDeposit_temp = (paths.lSim[trim:endT, :, :] .+ params.g * paths.deltaSim[trim:endT, :, :]) ./ paths.deltaSim[trim:endT, :, :]
     loanToDeposit = mean(loanToDeposit_temp)
 
-    mom = [debtToLiability, loanToAsset, capitalToDeposit, loanRate]
-    other_mom = [divToDeposit, divToDeposit_pos, divToDeposit_neg, failureRate, nPrimeUnderFailure, nPrimeUnderNoFailure, loanToDeposit]
+    mom = [debtToLiability, loanToAsset, capitalToDeposit, loanRate, failureRate]
+    other_mom = [divToDeposit, divToDeposit_pos, divToDeposit_neg, nPrimeUnderFailure, nPrimeUnderNoFailure, loanToDeposit]
     return (moments = mom, other_moments = other_mom)
 end
 
@@ -1276,9 +1289,12 @@ function solve_simulate_and_moments(params::Params{T,S},params_cal::Params_cal{T
     println("Obtained policy functions.")
     simulation = simulate_and_moments(params,params_cal,sol.eqq.vFuncs,policy,sol.Rl_star,regime);
     @show simulation.moments.moments
-    return (moments = simulation.moments, Rl_star = sol.Rl_star, sol = sol, policy = policy, simulation = simulation);
+    return (moments = simulation.moments, Rl_star = sol.Rl_star, sol = sol, policy = policy, paths = simulation.paths);
 end
 
+
+
+#### for more delicate calibration ###### 
 function calibration(params::Params{T,S},params_cal::Params_cal{T,S},regime::F) where {T<:Real,S<:Integer,F<:Bool}
 
     target_moments = [
