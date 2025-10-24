@@ -170,9 +170,16 @@ ex.moments
 @time ex_true = solve_simulate_and_moments(params_ex, params_cal, true);
 
 
-
-
-
+H = [0.947368421052632 0.0526315789473684 0; 0.0235294117647059 0.929411764705882 0.0470588235294118; 0 0.88 0.12]  # transition matrix: [iDelta, iDeltaPrime]
+cO = 0.1;
+cL = -0.25;
+E = 143.0;
+dBar = 1.0;
+include("main_v2_noLoanConstraint.jl");
+params_ex = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.H[3, :], params_ex.cM, params_ex.cO, params_ex.cL, params_ex.E, params_ex.dBar
+@time ex = solve_simulate_and_moments(params_ex, params_cal, false);
+@show ex.moments
 
 
 

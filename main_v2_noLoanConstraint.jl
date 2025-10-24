@@ -159,7 +159,7 @@ end
 
 
 #######################################################################################
-psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)^2.5; # 1.2
+psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)^1.5; # 1.2
 # psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 0.0;
 #=
 function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T  where {T<:Real, S<:Integer}
@@ -169,7 +169,7 @@ function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda:
         vfVals = [vFuncs.VF[iDelta, iLambda, iN] for iN in eachindex(nRange), iLambda in eachindex(lambdaRange), iDelta in eachindex(deltaRange)] # [nDelta, nLambda], evaluated value functions at (delta prime, lambda prime) when choosing l,s,b
         itp = interpolate((nRange, lambdaRange, deltaRange), vfVals, Gridded(Linear())) # , BSpline(Cubic(Line(OnGrid())))
         itp_ext = extrapolate(itp, Line())
-        
+
         return itp_ext(n, lambda, delta)
 end
 
