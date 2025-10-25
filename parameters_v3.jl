@@ -31,7 +31,8 @@ H = [0.947368421052632 0.0526315789473684 0; 0.0235294117647059 0.92941176470588
 
 # F = [0.9997 0.0002 0.0001; 0.005 0.99 0.005; 0 0.1 0.9] # transition matrix: [iLambda, iLambdaPrime]
 # F = [0.9 0.07 0.03; 0.07 0.9 0.03; 0 0.88 0.12] # transition matrix: [iLambda, iLambdaPrime]
-F = [0.625 0.2875 0.0875; 0.22449 0.500 0.27551; 0.075949 0.341772 0.582279] # from 고정이하여신비율 
+# F = [0.625 0.2875 0.0875; 0.22449 0.500 0.27551; 0.075949 0.341772 0.582279] # from 고정이하여신비율 
+F = [0.625 0.2875 0.0875; 0.22449 0.500 0.27551; 0.0 0.88 0.12] # from 고정이하여신비율 + April (for 3rd row)
 
 M = 1.0 # 정책변수: number of banks 
 
@@ -39,7 +40,7 @@ M = 1.0 # 정책변수: number of banks
 cM = 1.3e-5
 cO = 0.2
 cL = 0.5
-ϵ = -0.5 # loan demand elasticity, 1.1 for April
+ϵ = 1.1 # loan demand elasticity, 1.1 for April
 E = 100.0 # loan demand shifter
 
 n_start = -10.0 # retained earning could be negative, in particular when bank doesn't fail and tax is too high 

@@ -9,6 +9,7 @@ pwd()
 
 using JuMP, Ipopt, Interpolations, MathOptInterface, LinearAlgebra, ForwardDiff, Plots, Ipopt, Roots, Statistics
 using Profile, ProfileView, QuantEcon, StatsBase, Distributions, Random
+using Sobol, Distributions, Distributed
 const MOI = MathOptInterface
 
 struct Params{T<:Real,S<:Integer}
@@ -500,6 +501,9 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
         ## 2. set numbers for iteration and set the iteration  
         iter, maxdiffs, diffs = 1, one(T), zeros(T);
 
+        if iter == 1
+            println("VFI 시작 시 VF 평균값: ", mean(vFuncs.VF))
+        end
         # 3. start the iteration
         while iter <= maxiter && maxdiffs > tol
 
@@ -530,7 +534,51 @@ function VFI(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T
         end
 
         # 4. finish the iteration and return the value function 
+        println("VFI 종료 시 VF 평균값: ", mean(vFuncsNew.VF))
         return (vFuncs = vFuncs, vFuncsNew = vFuncsNew, Iterobj_is = Iterobj_is);  
+end
+
+function VFI!(params::Params{T,S}, Rl::T, regime::F, maxiter::S, tol::T) where {T<:Real, S<:Integer, F<:Bool}
+
+        iter, maxdiffs, diffs = 1, one(T), zeros(T);
+
+        if iter == 1
+            println("VFI 시작 시 VF 평균값: ", mean(vFuncs.VF))
+        end
+
+        # start the iteration
+        while iter <= maxiter && maxdiffs > tol
+
+            Threads.@threads for iDelta in 1:length(params.deltaGrid) # 3: number of states for Delta
+                for iLambda in 1:length(params.lambdaGrid)
+                    VFI_i(params, vFuncs, vFuncsNew, Rl, Iterobj_is[iDelta, iLambda], iDelta, iLambda, regime); # VFI for a given exogenous state (iDelta, iLambda)
+                end
+            end
+
+            if regime == false # ordinary regime
+                vFuncsNew.qBond .= params.β; # bank bond is risk-free 
+            else # special regime
+                qBond_specialRegime(params,vFuncsNew,Rl) # set qBond to be 1 for all states 
+            end
+
+            # 감쇠(damping) 업데이트로 진동 억제
+            @. vFuncs.VF = (1 - damping) * vFuncs.VF + damping * vFuncsNew.VF
+            @. vFuncs.qBond = (1 - damping) * vFuncs.qBond + damping * vFuncsNew.qBond
+            @. vFuncs.X = (1 - damping) * vFuncs.X + damping * vFuncsNew.X
+
+            # 수렴도 계산
+            diffs = abs.(vFuncs.VF .- vFuncsNew.VF)
+            maxdiffs = maximum(diffs)
+
+            if mod(iter, 200) == 0
+                println("VFI!: iter=$iter, maxdiffs=$maxdiffs")
+            end
+
+            iter += 1
+        end
+
+    println("VFI! 종료 시 VF 평균값: ", mean(vFuncs.VF))
+    return nothing
 end
 
 function Update_vFuncs_Diffs(vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, params::Params{T,S}) where {T<:Real, S<:Integer}; # after the optimization, calculate the differene
@@ -544,9 +592,14 @@ function Update_vFuncs_Diffs(vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,S}, par
         diffs = norm(vFuncsNew.diffs, Inf); # infinity norm of the difference of VF, already a scalar
 
         # 2. update vFuncsNew objects to vFuncs
-        copyto!(vFuncs.VF, vFuncsNew.VF); # update EVF
-        copyto!(vFuncs.qBond, vFuncsNew.qBond) # update qBond
-        copyto!(vFuncs.X, vFuncsNew.X) # update qBond
+      # copyto!(vFuncs.VF, vFuncsNew.VF); # update EVF
+       #  copyto!(vFuncs.qBond, vFuncsNew.qBond) # update qBond
+       #  copyto!(vFuncs.X, vFuncsNew.X) # update qBond
+
+        # 2-2. update in a weighted fashion to prevent ossilation
+        @. vFuncs.VF = (1 - 0.3) * vFuncs.VF + 0.3 * vFuncsNew.VF
+        @. vFuncs.qBond = (1 - 0.3) * vFuncs.qBond + 0.3 * vFuncsNew.qBond
+        @. vFuncs.X = (1 - 0.3) * vFuncs.X + 0.3 * vFuncsNew.X
         return diffs
 end
 
@@ -761,6 +814,9 @@ function solve_model(params::Params{T,S}, regime::F, a::T, b::T) where {T<:Real,
     # obtain the equilibrium under equilibrium loan rate Rl_star
     eq =  VFI(params, Rl_star, regime, 1000, 1e-4);
     eqq = stationary_distribution(params, Rl_star, eq.vFuncs, eq.vFuncsNew, eq.Iterobj_is, 1000, 1e-4);
+
+    # update-in-place to reuse the interim solution
+    # VFI!(params, Rl_star, regime, 1000, 1e-4);
     return (Rl_star = Rl_star, eq = eq, eqq = eqq)
     
 end
