@@ -45,6 +45,9 @@ struct Params{T<:Real,S<:Integer}
         γ::T
         ϕ::T
 
+        sigHat::T ## curvature for div, especially for stock issuance 
+        lconstr::T ## deposit to loan constraint
+
         deltaGrid::Array{T,1}
         lambdaGrid::Array{T,1}
         nGrid::Array{T,1}
@@ -98,7 +101,7 @@ struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), ob
         failure::Array{Array{T,1},1} # failure decision = [(fail or not fail vector for each lambda prime) for each n]
 end
 
-function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,ϵ::T,E::T,H::Array{T,2},F::Array{T,2},M::T,λL::T,λM::T,λH::T,γ::T,ϕ::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
+function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,ϵ::T,E::T,H::Array{T,2},F::Array{T,2},M::T,λL::T,λM::T,λH::T,γ::T,ϕ::T,sigHat::T,lconstr::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
         deltaGrid = [δL,δM,δH] # Define a Tuple, immutable 
         lambdaGrid = [λL,λM,λH] # regular array, mutable
         nGrid = range(n_start,stop=n_stop,length=n_npts)
@@ -107,7 +110,7 @@ function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dB
         sGrid = range(s_start,stop=s_stop,length=s_npts)
         bGrid = range(b_start,stop=b_stop,length=b_npts)
     
-        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
+        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,sigHat,lconstr,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
         return pam
 end
 
@@ -160,7 +163,7 @@ end
 
 
 #######################################################################################
-psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)^1.5; # 1.2
+psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 1 - exp(-d)^params.sigHat; # 1.2
 # psi(params::Params, d) = d >= 0 ? (d + params.dBar)^params.σ  - params.dBar^params.σ : 0.0;
 #=
 function inter_v_temp(params::Params{T,S}, vFuncs::VFuncs{T,S}, delta::T,lambda::T,n::T)::T  where {T<:Real, S<:Integer}
@@ -267,7 +270,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
         λ = params.lambdaGrid[iLambda]; # get the state for Lambda
 
         NAV(l::T,s::T,b::T,lambda::T)::T = Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # net asset value of the bank, lambda here is lambda prime 
-        tax(l::T,s::T,b::T,lambda::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *(δ + b)) # tax on the bank's asset value
+        tax(l::T,s::T,b::T,lambda::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *b - params.Rf*0.8*δ) # tax on the bank's asset value
         n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l # next period asset conditional on bank failure 
         n_success(l::T,s::T,b::T,lambda::T)::T = NAV(l,s,b,lambda) - tax(l,s,b,lambda) # next period asset conditional on bank success 
         # div_func(l::T,s::T,b::T,n::T)::T = n + (1-params.cL)*params.β*δ + vFuncs.qBond[l,s,b,iDelta,iLambda]*b - l - params.g * δ -s-params.cM*l^2 -params.cO 
@@ -389,7 +392,7 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
             b_min, b_max = first(params.bGrid), last(params.bGrid)
             ## alternative constraints: 예대율 규제
             # l_cap = min(l_max, (params.β - params.g) * params.deltaGrid[iDelta]) # l_start = (l_max+l_min)/2
-            l_cap = min(l_max, 2.0 * params.deltaGrid[iDelta]) # l_start = (l_max+l_min)/2
+            l_cap = min(l_max, params.lconstr * params.deltaGrid[iDelta]) # l_start = (l_max+l_min)/2
 
             # b_cap = min(b_max, (1 - params.α * params.wr) * l_max + s_max - (1 - params.g) * params.deltaGrid[iDelta]) # b_start = (b_max+b_min)/2
 
@@ -430,7 +433,9 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
             end
 
             @NLobjective(model, Max, G_interp_rev(l, s, b))
-            @constraint(model, (1-params.α*params.wr)*l + s - b >= (1-params.g)*params.deltaGrid[iDelta]) # constratint 1
+            @constraint(model, (1-0.13*params.wr)*l + s - b >= (1-params.g)*params.deltaGrid[iDelta]) # 자기자본규제
+
+            # @constraint(model, (1-params.α*params.wr)*l + s - b >= (1-params.g)*params.deltaGrid[iDelta]) # 자기자본규제
            # @constraint(model, l <= (params.β - params.g)*params.deltaGrid[iDelta]) # constratint 2
     
             try
@@ -684,7 +689,7 @@ function Update_stationary_dist(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncs
     l, s, b = params.lGrid[iLambdaPrime], params.sGrid[iLambdaPrime], params.bGrid[iLambdaPrime]
 
     NAV(l::T,s::T,b::T,lambda::T)::T = Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # net asset value of the bank, lambda here is lambda prime 
-    tax(l::T,s::T,b::T,lambda::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *(δ + b)) # tax on the bank's asset value
+    tax(l::T,s::T,b::T,lambda::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *b - params.Rf * 0.8 * δ) # tax on the bank's asset value
     n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l # next period asset conditional on bank failure 
     n_success(l::T,s::T,b::T,lambda::T)::T = NAV(l,s,b,lambda) - tax(l,s,b,lambda) # next period asset conditional on bank success 
 
@@ -718,9 +723,9 @@ function stationary_distribution(params::Params{T,S}, Rl::T, vFuncs::VFuncs{T,S}
 
        # println("stationary_distribution: iter = ", iter, ", maxdiffs = ", maxdiffs); # report the iteration progress
         Threads.@threads for iDelta in 1:length(params.deltaGrid) # 3: number of states for Delta
-         Threads.@threads for iLambda in 1:length(params.lambdaGrid)  # 3: number of states for Lambda
-            Threads.@threads for iN in 1:length(params.nGrid)
-                Threads.@threads for iLambdaPrime in 1:length(params.lambdaGrid)
+            for iLambda in 1:length(params.lambdaGrid)  # 3: number of states for Lambda
+                for iN in 1:length(params.nGrid)
+                    for iLambdaPrime in 1:length(params.lambdaGrid)
                         Update_stationary_dist(params, vFuncs, vFuncsNew, Iterobj_is, iDelta, iLambda, iN, iLambdaPrime, Rl)
                     end
                 end
@@ -864,9 +869,11 @@ end
 function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},vFuncs::VFuncs{T,S},Rl::T) where {T<:Real,S<:Integer}
 
     NAV(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # 이익잉여금, lambda here is lambda prime 
-    tax(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *(δ + b)) # tax on the bank's asset value
+    tax(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *b - params.Rf* 0.8 *δ  ) # tax on the bank's asset value
     n_failure(l::T, lambda::T,Rl::T)::T = params.α * params.wr * Rl * (1-lambda)*l # next period asset conditional on bank failure 
     n_success(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = NAV(l,s,b,lambda,Rl,δ) - tax(l,s,b,lambda,Rl,δ) # next period asset conditional on bank success 
+    # 자기자본규제 미충족시 은행이 실패한다고 가정할 때
+    capitalRequire(l::T,s::T,b::T,lambda::T,δ::T)::T = (1-params.α*params.wr)*(1-lambda)*l + s - b - (1-params.g)*δ # bank fails if negative
 
     # Interpolate qBond for a given value of choice (l,s,b) and state (delta, lambda)
     function qBond_interpolated(l::T, s::T, b::T, deltaInd::S, lambdaInd::S, params::Params{T,S}, vFuncs::VFuncs{T,S})::T
@@ -909,7 +916,8 @@ function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},
                 policy.sPolicy[iDelta, iLambda, iN] = iterobj.solution[iN][2]; # savings policy function
                 policy.bPolicy[iDelta, iLambda, iN] = iterobj.solution[iN][3]; # bond policy function
 
-                policy.failure[iDelta, iLambda, iN, :] .= [NAV(iterobj.solution[iN][1], iterobj.solution[iN][2], iterobj.solution[iN][3], params.lambdaGrid[iLambdaPrime], Rl, params.deltaGrid[iDelta]) < 0 for iLambdaPrime in 1:length(params.lambdaGrid)]; # failure or not, denoted as 1 or 0
+                # policy.failure[iDelta, iLambda, iN, :] .= [NAV(iterobj.solution[iN][1], iterobj.solution[iN][2], iterobj.solution[iN][3], params.lambdaGrid[iLambdaPrime], Rl, params.deltaGrid[iDelta]) < 0 for iLambdaPrime in 1:length(params.lambdaGrid)]; # failure or not, denoted as 1 or 0
+                policy.failure[iDelta, iLambda, iN, :] .= [capitalRequire(iterobj.solution[iN][1], iterobj.solution[iN][2], iterobj.solution[iN][3], params.lambdaGrid[iLambdaPrime], params.deltaGrid[iDelta]) < 0 for iLambdaPrime in 1:length(params.lambdaGrid)]; # failure or not, denoted as 1 or 0
                 policy.nPrimePolicy[iDelta, iLambda, iN, :] .= [policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? n_failure(iterobj.solution[iN][1], params.lambdaGrid[iLambdaPrime], Rl) : n_success(iterobj.solution[iN][1], iterobj.solution[iN][2], iterobj.solution[iN][3], params.lambdaGrid[iLambdaPrime], Rl,params.deltaGrid[iDelta]) for iLambdaPrime in 1:length(params.lambdaGrid)]
                 policy.NAV[iDelta, iLambda, iN, :] .= [NAV(iterobj.solution[iN][1], iterobj.solution[iN][2], iterobj.solution[iN][3], params.lambdaGrid[iLambdaPrime], Rl, params.deltaGrid[iDelta]) for iLambdaPrime in 1:length(params.lambdaGrid)]
                 q = qBond_interpolated(iterobj.solution[iN][1], iterobj.solution[iN][2], iterobj.solution[iN][3], iDelta, iLambda, params, vFuncs); # bond price under the optimal choice of (l,s,b) at state (delta, lambda)
@@ -963,6 +971,7 @@ struct SimPaths{T<:Real,S<:Integer}
     debtToLiability::Array{T,3} # for moment1
     capitalToDeposit::Array{T,3} # for moment2
     loanToAsset::Array{T,3} # for moment3
+    loanToDeposit::Array{T,3}
 end
 
 # storing data moments
@@ -1070,8 +1079,9 @@ function Initiate_Paths(shocks::SimShocks{S}, params::Params{T,S}) where {T<:Rea
     debtToLiability = zeros(T, bigT, bigJ, bigN);
     capitalToDeposit = zeros(T, bigT, bigJ, bigN);
     loanToAsset = zeros(T, bigT, bigJ, bigN);
+    loanToDeposit = zeros(T, bigT, bigJ, bigN);
 
-    return SimPaths(deltaIndSim, lambdaIndSim, nInitialIndSim, bigN, bigJ, bigT, deltaSim, lambdaSim, lSim, sSim, bSim, failureSim, nSim, divSim, nIndSim, nPrimeSim, nPrimeIndSim, assetSim, assetPrimeSim, liabilitySim, Γ, ΓPrime, qBondSim, gSim, govSpendingSim, aggGovSpendingSim, depositLoanRatioSim, leverageSim, debtToLiability, capitalToDeposit, loanToAsset);
+    return SimPaths(deltaIndSim, lambdaIndSim, nInitialIndSim, bigN, bigJ, bigT, deltaSim, lambdaSim, lSim, sSim, bSim, failureSim, nSim, divSim, nIndSim, nPrimeSim, nPrimeIndSim, assetSim, assetPrimeSim, liabilitySim, Γ, ΓPrime, qBondSim, gSim, govSpendingSim, aggGovSpendingSim, depositLoanRatioSim, leverageSim, debtToLiability, capitalToDeposit, loanToAsset, loanToDeposit);
 end
 
 # after initiating paths, simulate the eq and calculate moments of interest
@@ -1105,10 +1115,11 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
 
     NAV(l::T,s::T,b::T,lambda::T,δ::T)::T = Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b; # 순자산, net asset value 
     totalAsset(l::T,s::T,lambda::T,δ::T)::T = Rl * ( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s; # total asset of the bank, 총자산
-    tax(l::T,s::T,b::T,lambda::T,δ::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *(δ + b)); # tax on the bank's asset value
+    tax(l::T,s::T,b::T,lambda::T,δ::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf * b - params.Rf * 0.8 * δ ); # tax on the bank's asset value
     n_success(l::T,s::T,b::T,lambda::T,δ::T)::T = NAV(l,s,b,lambda,δ) - tax(l,s,b,lambda,δ); # next period asset conditional on bank success 
     n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l; # next period asset conditional on bank failure 
     govGuarantedSpending(lambda::T, δ::T)::T = Rl * (lambda + params.ξ) * params.g * δ; 
+    capitalRequire(l::T,s::T,b::T,lambda::T,δ::T)::T = (1-params.α*params.wr)*(1-lambda)*l + s - b - (1-params.g)*δ; # bank fails if negative
 
     ### government spending for regime == true 
     # bHat_true(delta::T,lambda::T,l::T,s::T,b::T)::T =  # Rl*[(1-lambda)*l + params.g*delta] + (1+params.Rf)*s - delta; # when the bank survives, the amount of liability that needs to be bailed out by the government
@@ -1219,36 +1230,40 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         paths.divSim[smallT, smallJ, smallN] = params.nGrid[paths.nInitialIndSim[smallJ, smallN]] + (1-params.cL) * params.β * delta + qBond_interpolated(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], params, vFuncs) * paths.bSim[smallT, smallJ, smallN] - paths.lSim[smallT, smallJ, smallN] - params.g * delta - paths.sSim[smallT, smallJ, smallN] - params.cM * paths.lSim[smallT, smallJ, smallN]^2 - params.cO; # dividend (배당금); current period
         paths.assetSim[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] + paths.sSim[smallT, smallJ, smallN]; # total asset before lambdaPrime
         paths.assetPrimeSim[smallT, smallJ, smallN] = totalAsset(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], lambdaPrime, delta);  # total asset given lambdaPrime
-        paths.failureSim[smallT, smallJ, smallN] = ( paths.assetPrimeSim[smallT, smallJ, smallN] - paths.bSim[smallT, smallJ, smallN] - delta < 0 ) ? 1 : 0; # failure or not, denoted as 1 or 0
+        paths.failureSim[smallT, smallJ, smallN] = (capitalRequire(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN],paths.bSim[smallT, smallJ, smallN],lambdaPrime, delta) < 0 ) ? 1 : 0; # failure or not, denoted as 1 or 0
         paths.liabilitySim[smallT, smallJ, smallN] = paths.bSim[smallT, smallJ, smallN] + delta; # total liability; current period
         paths.gSim[smallT, smallJ, smallN] = params.g * delta; # government guaranteed loan, current period
         paths.qBondSim[smallT, smallJ, smallN] = qBond_interpolated(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], params, vFuncs); # bond price under the choice of (l,s,b) at state (delta, lambda), current period
         paths.leverageSim[smallT, smallJ, smallN] = paths.liabilitySim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # leverage ratio, current period
         paths.debtToLiability[smallT, smallJ, smallN] = paths.bSim[smallT, smallJ, smallN] / paths.liabilitySim[smallT, smallJ, smallN];
         paths.loanToAsset[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # 
+        paths.loanToDeposit[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.deltaSim[smallT, smallJ, smallN];
 
+
+        paths.failureSim[smallT, smallJ, smallN]
         if paths.failureSim[smallT, smallJ, smallN] == 1 # if failure
-            paths.nPrimeSim[smallT, smallJ, smallN] = n_failure(paths.lSim[smallT, smallJ, smallN], lambdaPrime); # next period asset conditional on bank failure 
+           paths.nPrimeSim[smallT, smallJ, smallN] = n_failure(paths.lSim[smallT, smallJ, smallN], lambdaPrime); # next period asset conditional on bank failure 
         else # if success
-            paths.nPrimeSim[smallT, smallJ, smallN] = n_success(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], lambdaPrime, delta); # next period asset conditional on bank success 
+           paths.nPrimeSim[smallT, smallJ, smallN] = n_success(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], lambdaPrime, delta); # next period asset conditional on bank success 
         end
         paths.capitalToDeposit[smallT, smallJ, smallN] = (1-paths.failureSim[smallT, smallJ, smallN])*paths.nPrimeSim[smallT, smallJ, smallN]/delta;
 
     else # for smallT > 1,
-        paths.nSim[smallT, smallJ, smallN] = paths.nPrimeSim[smallT, smallJ, smallN] # 잉여금 as a embodied state 
+        paths.nSim[smallT, smallJ, smallN] = paths.nPrimeSim[smallT-1, smallJ, smallN] # 잉여금 as a embodied state 
         paths.lSim[smallT, smallJ, smallN] = lsb_interpolated(params, policy, paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], paths.nSim[smallT, smallJ, smallN])[1]; # loan policy function
         paths.sSim[smallT, smallJ, smallN] = lsb_interpolated(params, policy, paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], paths.nSim[smallT, smallJ, smallN])[2]; # savings policy function
         paths.bSim[smallT, smallJ, smallN] = lsb_interpolated(params, policy, paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], paths.nSim[smallT, smallJ, smallN])[3]; # bond policy function
         paths.divSim[smallT, smallJ, smallN] = paths.nSim[smallT, smallJ, smallN] + (1-params.cL) * params.β * delta + qBond_interpolated(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], params, vFuncs) * paths.bSim[smallT, smallJ, smallN] - paths.lSim[smallT, smallJ, smallN] - params.g * delta - paths.sSim[smallT, smallJ, smallN] - params.cM * paths.lSim[smallT, smallJ, smallN]^2 - params.cO; # dividend (배당금); current period
         paths.assetSim[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] + paths.sSim[smallT, smallJ, smallN]; # total asset before lambdaPrime
         paths.assetPrimeSim[smallT, smallJ, smallN] = totalAsset(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], lambdaPrime, delta);  # total asset given lambdaPrime
-        paths.failureSim[smallT, smallJ, smallN] = ( paths.assetSim[smallT, smallJ, smallN] - paths.bSim[smallT, smallJ, smallN] - delta < 0 ) ? 1 : 0; # failure or not, denoted as 1 or 0
+        paths.failureSim[smallT, smallJ, smallN] = (capitalRequire(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN],paths.bSim[smallT, smallJ, smallN],lambdaPrime, delta) < 0 ) ? 1 : 0; # failure or not, denoted as 1 or 0
         paths.liabilitySim[smallT, smallJ, smallN] = paths.bSim[smallT, smallJ, smallN] + delta; # total liability; current period
         paths.gSim[smallT, smallJ, smallN] = params.g * delta; # government guaranteed loan, current period
         paths.qBondSim[smallT, smallJ, smallN] = qBond_interpolated(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], params, vFuncs); # bond price under the choice of (l,s,b) at state (delta, lambda), current period
         paths.leverageSim[smallT, smallJ, smallN] = paths.liabilitySim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # leverage ratio, current period
         paths.debtToLiability[smallT, smallJ, smallN] = paths.bSim[smallT, smallJ, smallN] / paths.liabilitySim[smallT, smallJ, smallN];
         paths.loanToAsset[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN];
+        paths.loanToDeposit[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.deltaSim[smallT, smallJ, smallN];
 
         # 3. depending on failure or not, 
         if paths.failureSim[smallT, smallJ, smallN] == 1 # if failure
@@ -1327,7 +1342,7 @@ function calculate_moments(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFunc
     loanToDeposit_temp = (paths.lSim[trim:endT, :, :] .+ params.g * paths.deltaSim[trim:endT, :, :]) ./ paths.deltaSim[trim:endT, :, :]
     loanToDeposit = mean(loanToDeposit_temp)
 
-    mom = [debtToLiability, loanToAsset, capitalToDeposit, loanRate, failureRate]
+    mom = [debtToLiability, loanToAsset, capitalToDeposit, failureRate, loanRate]
     other_mom = [divToDeposit, divToDeposit_pos, divToDeposit_neg, nPrimeUnderFailure, nPrimeUnderNoFailure, loanToDeposit]
     return (moments = mom, other_moments = other_mom)
 end
