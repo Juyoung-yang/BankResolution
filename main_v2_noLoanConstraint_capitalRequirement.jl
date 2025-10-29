@@ -952,7 +952,10 @@ function Get_PolicyFuncs(params::Params{T,SS},Iterobj_is::Matrix{IterObj_i{T,SS}
                   #  policy.govSpend_bailout[iDelta, iLambda, iN, :] = sum([policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? max(0, (1 - params.cF) * (Rl * ((1 - params.lambdaGrid[iLambdaPrime]) * iterobj.solution[iN][1] + params.g * params.deltaGrid[iDelta]) + (1 + params.Rf) * iterobj.solution[iN][2]) - params.deltaGrid[iDelta] - params.α * params.wr * Rl * (1 - params.lambdaGrid[iLambdaPrime]) * iterobj.solution[iN][1]) : 0 for iLambdaPrime in 1:length(params.lambdaGrid)]); # government spending for bank bailout
                 else # benchmark regime 
                     govSpend_bailout_temp = [(1- params.ρ_bailout)*[params.deltaGrid[iDelta] + iterobj.solution[iN][3] - Rl * (1-params.α*params.wr)* (1-lambdaPrime)*iterobj.solution[iN][1] + params.g*params.deltaGrid[iDelta] - (1+params.Rf)*iterobj.solution[iN][2]] for lambdaPrime in params.lambdaGrid];
-                    policy.govSpend_bailout[iDelta, iLambda, iN, :] .= ( policy.failure[iDelta, iLambda, iN, :] .== 1 ) .* vec(govSpend_bailout_temp);
+                    policy.govSpend_bailout[iDelta, iLambda, iN, 1] = govSpend_bailout_temp[1][1] * Float64(policy.failure[iDelta, iLambda, iN, 1]); 
+                    policy.govSpend_bailout[iDelta, iLambda, iN, 2] = govSpend_bailout_temp[2][1] * Float64(policy.failure[iDelta, iLambda, iN, 2]);
+                    policy.govSpend_bailout[iDelta, iLambda, iN, 3] = govSpend_bailout_temp[3][1] * Float64(policy.failure[iDelta, iLambda, iN, 3]);
+                    #  policy.govSpend_bailout[iDelta, iLambda, iN, :] .= ( policy.failure[iDelta, iLambda, iN, :] .== 1 ) .* vec(govSpend_bailout_temp);
                 end
             end
         end
@@ -1511,4 +1514,5 @@ function calibration(params::Params{T,S},params_cal::Params_cal{T,S},regime::F) 
     # return (best_loss = Parallel_test[best_idx], best_initial = best_initial, calibrated_params = result)
     return (result = Parallel_test, best_idx = best_idx, best_initial = best_initial)
 end
+
 
