@@ -1148,7 +1148,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
     tax(l::T,s::T,b::T,lambda::T,δ::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf * b - params.Rf * 0.8 * δ ); # tax on the bank's asset value
     n_success(l::T,s::T,b::T,lambda::T,δ::T)::T = NAV(l,s,b,lambda,δ) - tax(l,s,b,lambda,δ); # next period asset conditional on bank success 
     n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l; # next period asset conditional on bank failure 
-    govGuarantedSpending(lambda::T, δ::T)::T = Rl * (lambda + params.ξ) * params.g * δ; 
+    # govGuarantedSpending(lambda::T, δ::T)::T = Rl * (lambda + params.ξ) * params.g * δ; 
     capitalRequire(l::T,s::T,b::T,lambda::T,δ::T)::T = (1-params.α*params.wr)*(1-lambda)*l + s - b - (1-params.g)*δ; # bank fails if negative
 
     ### government spending for regime == true 
@@ -1269,14 +1269,16 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         paths.loanToAsset[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # 
         paths.loanToDeposit[smallT, smallJ, smallN] = (paths.lSim[smallT, smallJ, smallN] + params.g * paths.deltaSim[smallT, smallJ, smallN])/ (0.9801 * paths.deltaSim[smallT, smallJ, smallN]);
 
-
-        paths.failureSim[smallT, smallJ, smallN]
         if paths.failureSim[smallT, smallJ, smallN] == 1 # if failure
            paths.nPrimeSim[smallT, smallJ, smallN] = n_failure(paths.lSim[smallT, smallJ, smallN], lambdaPrime); # next period asset conditional on bank failure 
         else # if success
            paths.nPrimeSim[smallT, smallJ, smallN] = n_success(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], lambdaPrime, delta); # next period asset conditional on bank success 
         end
+                
         paths.capitalToDeposit[smallT, smallJ, smallN] = (1-paths.failureSim[smallT, smallJ, smallN])*paths.nPrimeSim[smallT, smallJ, smallN]/delta;
+        paths.govSpendingSim[smallT, smallJ, smallN] = paths.govSpend_guarantee[paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], paths.nInitialIndSim[smallJ, smallN], paths.lambdaIndSim[smallT+1, smallJ, smallN]] + paths.govSpend_bailout[paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], paths.nInitialIndSim[smallJ, smallN], paths.lambdaIndSim[smallT+1, smallJ, smallN]];
+       
+
 
     else # for smallT > 1,
         paths.nSim[smallT, smallJ, smallN] = paths.nPrimeSim[smallT-1, smallJ, smallN] # 잉여금 as a embodied state 
@@ -1301,24 +1303,10 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         else # if success
             paths.nPrimeSim[smallT, smallJ, smallN] = n_success(paths.lSim[smallT, smallJ, smallN], paths.sSim[smallT, smallJ, smallN], paths.bSim[smallT, smallJ, smallN], lambdaPrime, delta); # next period asset conditional on bank success 
         end
+                
         paths.capitalToDeposit[smallT, smallJ, smallN] = (1-paths.failureSim[smallT, smallJ, smallN])*paths.nPrimeSim[smallT, smallJ, smallN]/delta;
+        paths.govSpendingSim[smallT, smallJ, smallN] = paths.govSpend_guarantee[paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], paths.nSim[smallJ, smallN], paths.lambdaIndSim[smallT+1, smallJ, smallN]] + paths.govSpend_bailout[paths.deltaIndSim[smallT, smallJ, smallN], paths.lambdaIndSim[smallT, smallJ, smallN], paths.nInitialIndSim[smallJ, smallN], paths.nSim[smallT+1, smallJ, smallN]];
     end
-
-    if regime == "true"
-        if paths.failureSim[smallT, smallJ, smallN] == 1
-            paths.govSpendingSim[smallT, smallJ, smallN] = govGuarantedSpending(lambdaPrime, delta); # + bailoutCost_true; # government spending for bank bailout, next period with lambdaPrime
-        else
-            paths.govSpendingSim[smallT, smallJ, smallN] = govGuarantedSpending(lambdaPrime, delta); 
-        end
-    else # regime == "false"
-        if paths.failureSim[smallT, smallJ, smallN] == 1
-            paths.govSpendingSim[smallT, smallJ, smallN] = govGuarantedSpending(lambdaPrime, delta); #+ bailoutCost_false; # government spending for bank bailout, next period with lambdaPrime
-        else
-            paths.govSpendingSim[smallT, smallJ, smallN] = govGuarantedSpending(lambdaPrime, delta); # no government spending for bank bailout
-        end
-    end
-# govSpend_guarantee = zeros(T, length(params.deltaGrid), length(params.lambdaGrid), length(params.nGrid), length(params.lambdaGrid));
-# govSpend_bailout
 end
 
 
@@ -1523,3 +1511,4 @@ function calibration(params::Params{T,S},params_cal::Params_cal{T,S},regime::F) 
     # return (best_loss = Parallel_test[best_idx], best_initial = best_initial, calibrated_params = result)
     return (result = Parallel_test, best_idx = best_idx, best_initial = best_initial)
 end
+
