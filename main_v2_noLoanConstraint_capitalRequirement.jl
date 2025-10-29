@@ -19,6 +19,7 @@ struct Params{T<:Real,S<:Integer}
         wr::T
         α::T
         ρ::T
+        ρ_bailout::T
         g::T
         ξ::T
         cF::T
@@ -98,7 +99,7 @@ struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), ob
         failure::Array{Array{T,1},1} # failure decision = [(fail or not fail vector for each lambda prime) for each n]
 end
 
-function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,ϵ::T,E::T,H::Array{T,2},F::Array{T,2},M::T,λL::T,λM::T,λH::T,sigHat::T,lconstr::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
+function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,ρ_bailout::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,ϵ::T,E::T,H::Array{T,2},F::Array{T,2},M::T,λL::T,λM::T,λH::T,sigHat::T,lconstr::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
         deltaGrid = [δL,δM,δH] # Define a Tuple, immutable 
         lambdaGrid = [λL,λM,λH] # regular array, mutable
         nGrid = range(n_start,stop=n_stop,length=n_npts)
@@ -107,7 +108,7 @@ function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dB
         sGrid = range(s_start,stop=s_stop,length=s_npts)
         bGrid = range(b_start,stop=b_stop,length=b_npts)
     
-        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,sigHat,lconstr,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
+        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,ρ_bailout,g,ξ,cF,dBar,σ,τC,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,sigHat,lconstr,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
         return pam
 end
 
@@ -389,13 +390,15 @@ function VFI_i(params::Params{T,S}, vFuncs::VFuncs{T,S}, vFuncsNew::VFuncsNew{T,
             b_min, b_max = first(params.bGrid), last(params.bGrid)
             ## alternative constraints: 예대율 규제
             # l_cap = min(l_max, (params.β - params.g) * params.deltaGrid[iDelta]) # l_start = (l_max+l_min)/2
-            l_cap = min(l_max, params.lconstr * params.deltaGrid[iDelta]) # l_start = (l_max+l_min)/2
+            # l_cap = min(l_max, (params.lconstr * 0.9801 - params.g) * params.deltaGrid[iDelta])  #예금가격 = 0.9801일 때 
+            l_cap = (params.lconstr * 0.9801 - params.g) * params.deltaGrid[iDelta]
 
             # b_cap = min(b_max, (1 - params.α * params.wr) * l_max + s_max - (1 - params.g) * params.deltaGrid[iDelta]) # b_start = (b_max+b_min)/2
 
             # start: warm-start 있으면 사용, 없으면 중앙값
            #  l0 = warm_start === nothing ? (l_min + l_max)/2 : warm_start[1] # 예대율 규제가 없을 때
-             l0 = warm_start === nothing ? (l_min + l_cap)/2 : warm_start[1] # 예대율 규제가 들어갈 때
+            
+           l0 = warm_start === nothing ? (l_min + l_cap)/2 : warm_start[1] # 예대율 규제가 들어갈 때
             s0 = warm_start === nothing ? (s_min + s_max)/2 : warm_start[2]
            #  b0 = warm_start === nothing ? (b_min + b_cap)/2 : warm_start[3]
             b0 = warm_start === nothing ? (b_min + b_max)/2 : warm_start[3]
@@ -845,6 +848,8 @@ struct PolicyFuncs{T<:Real,S<:Integer}
     divPolicy::Array{T,3} # dividend policy function (delta, lambda, n) under the optimal choice of (l,s,b)
     qBondPolicy::Array{T,3} # bond price policy function (delta, lambda, n)
     taxPolicy::Array{T,3} # tax policy function (delta, lambda, n)
+    govSpend_guarantee::Array{T,4}
+    govSpend_bailout::Array{T,4}
 end
 
 function Initiate_PolicyFuncs(params::Params{T,S}) where {T<:Real,S<:Integer}
@@ -858,12 +863,14 @@ function Initiate_PolicyFuncs(params::Params{T,S}) where {T<:Real,S<:Integer}
     divPolicy = zeros(T, length(params.deltaGrid), length(params.lambdaGrid), length(params.nGrid)); # dividend policy function (delta, lambda, n) under the optimal choice of (l,s,b)
     qBondPolicy = zeros(T, length(params.deltaGrid), length(params.lambdaGrid), length(params.nGrid));
     taxPolicy = zeros(T, length(params.deltaGrid), length(params.lambdaGrid), length(params.nGrid));
+    govSpend_guarantee = zeros(T, length(params.deltaGrid), length(params.lambdaGrid), length(params.nGrid), length(params.lambdaGrid));
+    govSpend_bailout = zeros(T, length(params.deltaGrid), length(params.lambdaGrid), length(params.nGrid), length(params.lambdaGrid));
 
-    policyy = PolicyFuncs{T,S}(lPolicy, sPolicy, bPolicy, failure, nPrimePolicy, NAV, divPolicy, qBondPolicy, taxPolicy);
+    policyy = PolicyFuncs{T,S}(lPolicy, sPolicy, bPolicy, failure, nPrimePolicy, NAV, divPolicy, qBondPolicy, taxPolicy, govSpend_guarantee, govSpend_bailout);
     return policyy;
 end
 
-function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},vFuncs::VFuncs{T,S},Rl::T) where {T<:Real,S<:Integer}
+function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},vFuncs::VFuncs{T,S},Rl::T,regime::F) where {T<:Real,S<:Integer,F<:Bool}
 
     NAV(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # 이익잉여금, lambda here is lambda prime 
     tax(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *b - params.Rf* 0.8 *δ  ) # tax on the bank's asset value
@@ -921,6 +928,33 @@ function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},
                 policy.qBondPolicy[iDelta, iLambda, iN] = q; # bond price policy function
                 policy.divPolicy[iDelta, iLambda, iN] = params.nGrid[iN] + (1-params.cL)*params.β*params.deltaGrid[iDelta] + q*iterobj.solution[iN][3] - iterobj.solution[iN][1] - params.g*params.deltaGrid[iDelta] - iterobj.solution[iN][2] - params.cM*iterobj.solution[iN][1]^2 - params.cO; # dividend policy function under the optimal choice of (l,s,b)
                 policy.taxPolicy[iDelta, iLambda, iN] = tax(iterobj.solution[iN][1], iterobj.solution[iN][2], iterobj.solution[iN][3], params.lambdaGrid[iLambda], Rl, params.deltaGrid[iDelta]); # tax policy function under the optimal choice of (l,s,b)
+                # 정부 상시 변제비용
+                policy.govSpend_guarantee[iDelta, iLambda, iN, :] .= [Rl * (iLambdaPrime + params.ξ) * params.g * params.deltaGrid[iDelta] for iLambdaPrime in 1:length(params.lambdaGrid)]; # government guaranteed loan
+                # 정부 긴급 구제비용 
+                if regime == true # counterfactual regime 
+                    Lambda = params.lambdaGrid
+                    NetAsset = Rl .* ((ones(3)) - Lambda) .* iterobj.solution[iN][1] .+ (1 .+ params.Rf) .* iterobj.solution[iN][2] .- params.deltaGrid[iDelta]; # net asset value before bailout
+                    hi = max(zero(3), NetAsset)
+                    VLB_temp = [ min( iterobj.solution[iN][3], hi[iLambdaPrime]) for iLambdaPrime in 1:length(params.lambdaGrid)]
+                    bHat_temp = [ NetAsset[iLambdaPrime] - params.α*params.wr * Rl * (1-Lambda[iLambdaPrime]) * iterobj.solution[iN][1] for iLambdaPrime in 1:length(params.lambdaGrid)]
+                    VF_temp = similar(params.lambdaGrid)
+                    for iLambdaPrimee in 1:length(params.lambdaGrid)
+                        n_temp = n_failure(iterobj.solution[iN][1], params.lGrid[iLambdaPrimee], Rl)
+                        vf_slice = vFuncs.VF[:, iΛp, :]  
+                        itp = interpolate(vf_slice[iΔ, :], BSpline(Linear()))
+                        VF_temp[iΛp] = itp[n_temp]
+                        # VF_temp[iLambdaPrimee] = [interpolate(vFuncs.VF[iDelta, iLambdaPrimee, :], BSpline(Linear()))[n_temp] for iDelta in 1:length(params.deltaGrid)]
+                    end
+                    EV_temp = params.H * VF_temp
+                    govSpend_bailout_temp = [max(VLB_temp[iLambdaPrime] - bHat_temp[iLambdaPrime], 0) - EV_temp[iLambdaPrime] for iLambdaPrime in 1:length(params.lambdaGrid)];
+                    policy.govSpend_bailout[iDelta, iLambda, iN, :] .= [policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? govSpend_bailout_temp[iLambdaPrime] : 0.0 for iLambdaPrime in 1:length(params.lambdaGrid)];
+
+                  #  policy.govSpend_bailout[iDelta, iLambda, iN, :] = sum([policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? max(0, (1 - params.cF) * (Rl * ((1 - params.lambdaGrid[iLambdaPrime]) * iterobj.solution[iN][1] + params.g * params.deltaGrid[iDelta]) + (1 + params.Rf) * iterobj.solution[iN][2]) - params.deltaGrid[iDelta] - params.α * params.wr * Rl * (1 - params.lambdaGrid[iLambdaPrime]) * iterobj.solution[iN][1]) : 0 for iLambdaPrime in 1:length(params.lambdaGrid)]); # government spending for bank bailout
+                else # benchmark regime 
+                    govSpend_bailout_temp = [(1- params.ρ_bailout)*[params.deltaGrid[iDelta] + iterobj.solution[iN][3] - Rl * (1-params.α*params.wr)* (1-lambdaPrime)*iterobj.solution[iN][1] + params.g*params.deltaGrid[iDelta] - (1+params.Rf)*iterobj.solution[iN][2]] for lambdaPrime in params.lambdaGrid];
+                    policy.govSpend_bailout[iDelta, iLambda, iN, :] .= [policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? govSpend_bailout_temp[iLambdaPrime] : 0.0 for iLambdaPrime in 1:length(params.lambdaGrid)];
+                end
+                
             end
         end
     end
@@ -1076,7 +1110,7 @@ function Initiate_Paths(shocks::SimShocks{S}, params::Params{T,S}) where {T<:Rea
     debtToLiability = zeros(T, bigT, bigJ, bigN);
     capitalToDeposit = zeros(T, bigT, bigJ, bigN);
     loanToAsset = zeros(T, bigT, bigJ, bigN);
-    loanToDeposit = zeros(T, bigT, bigJ, bigN);
+    loanToDeposit = zeros(T, bigT, bigJ, bigN); # 예대율 비율, 여기서 loan은 정부보증 대출 포함한 총 대출
 
     return SimPaths(deltaIndSim, lambdaIndSim, nInitialIndSim, bigN, bigJ, bigT, deltaSim, lambdaSim, lSim, sSim, bSim, failureSim, nSim, divSim, nIndSim, nPrimeSim, nPrimeIndSim, assetSim, assetPrimeSim, liabilitySim, Γ, ΓPrime, qBondSim, gSim, govSpendingSim, aggGovSpendingSim, depositLoanRatioSim, leverageSim, debtToLiability, capitalToDeposit, loanToAsset, loanToDeposit);
 end
@@ -1234,7 +1268,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         paths.leverageSim[smallT, smallJ, smallN] = paths.liabilitySim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # leverage ratio, current period
         paths.debtToLiability[smallT, smallJ, smallN] = paths.bSim[smallT, smallJ, smallN] / paths.liabilitySim[smallT, smallJ, smallN];
         paths.loanToAsset[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # 
-        paths.loanToDeposit[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.deltaSim[smallT, smallJ, smallN];
+        paths.loanToDeposit[smallT, smallJ, smallN] = (paths.lSim[smallT, smallJ, smallN] + params.g * paths.deltaSim[smallT, smallJ, smallN])/ (0.9801 * paths.deltaSim[smallT, smallJ, smallN]);
 
 
         paths.failureSim[smallT, smallJ, smallN]
@@ -1260,7 +1294,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
         paths.leverageSim[smallT, smallJ, smallN] = paths.liabilitySim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN]; # leverage ratio, current period
         paths.debtToLiability[smallT, smallJ, smallN] = paths.bSim[smallT, smallJ, smallN] / paths.liabilitySim[smallT, smallJ, smallN];
         paths.loanToAsset[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.assetSim[smallT, smallJ, smallN];
-        paths.loanToDeposit[smallT, smallJ, smallN] = paths.lSim[smallT, smallJ, smallN] / paths.deltaSim[smallT, smallJ, smallN];
+        paths.loanToDeposit[smallT, smallJ, smallN] = (paths.lSim[smallT, smallJ, smallN] + params.g * paths.deltaSim[smallT, smallJ, smallN])/ (0.9801 * paths.deltaSim[smallT, smallJ, smallN]);
 
         # 3. depending on failure or not, 
         if paths.failureSim[smallT, smallJ, smallN] == 1 # if failure
@@ -1284,7 +1318,8 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
             paths.govSpendingSim[smallT, smallJ, smallN] = govGuarantedSpending(lambdaPrime, delta); # no government spending for bank bailout
         end
     end
-
+# govSpend_guarantee = zeros(T, length(params.deltaGrid), length(params.lambdaGrid), length(params.nGrid), length(params.lambdaGrid));
+# govSpend_bailout
 end
 
 
@@ -1336,8 +1371,7 @@ function calculate_moments(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFunc
     n = count(!iszero, nPrime_noFailure)
     s = sum(nPrime_noFailure)
     nPrimeUnderNoFailure = s/n
-    loanToDeposit_temp = (paths.lSim[trim:endT, :, :] .+ params.g * paths.deltaSim[trim:endT, :, :]) ./ paths.deltaSim[trim:endT, :, :]
-    loanToDeposit = mean(loanToDeposit_temp)
+    loanToDeposit = mean(paths.loanToDeposit[trim:endT, :, :])
 
     mom = [debtToLiability, loanToAsset, capitalToDeposit, failureRate, loanRate]
     other_mom = [divToDeposit, divToDeposit_pos, divToDeposit_neg, nPrimeUnderFailure, nPrimeUnderNoFailure, loanToDeposit]
