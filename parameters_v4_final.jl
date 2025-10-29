@@ -8,7 +8,8 @@ cL = -0.005 # let operation cost for deposit being very small;
 cF = 1.0 # 필요없지만 일단 빼진 말자...
 wr = 0.428
 α = 0.08
-ρ = 0.4 # 은행 실패시의 패널티, calibration table의 η, 실패은행의 주가 하락률이 60%라고 가정했을 때, 1-η = 0.4
+ρ = 0.4 # 은행 실패시의 패널티, calibration table의 η, 실패은행의 주가 하락률이 60%라고 가정했을 때, 1-η = 0.4, 본문에서는 eta.
+ρ_bailout = 0.72 # needs when calculating government spending on bailout
 g = 0.1816246 # 예금부채 대비 보증자산 규모
 ξ = 0.0214
 τC = 0.205 # 최근 10년 실효 법인세 평균: 21.5%

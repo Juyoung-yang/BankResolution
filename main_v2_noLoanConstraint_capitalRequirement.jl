@@ -870,7 +870,7 @@ function Initiate_PolicyFuncs(params::Params{T,S}) where {T<:Real,S<:Integer}
     return policyy;
 end
 
-function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},vFuncs::VFuncs{T,S},Rl::T,regime::F) where {T<:Real,S<:Integer,F<:Bool}
+function Get_PolicyFuncs(params::Params{T,SS},Iterobj_is::Matrix{IterObj_i{T,SS}},vFuncs::VFuncs{T,SS},Rl::T,regime::F) where {T<:Real,SS<:Integer,F<:Bool}
 
     NAV(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = Rl*( (1-lambda)*l + params.g*δ) + (1+params.Rf)*s - δ - b # 이익잉여금, lambda here is lambda prime 
     tax(l::T,s::T,b::T,lambda::T,Rl::T,δ::T)::T = params.τC * max(0, (Rl-1)*((1-lambda)*l +params.g*δ) + params.Rf*s - params.Rf *b - params.Rf* 0.8 *δ  ) # tax on the bank's asset value
@@ -880,7 +880,7 @@ function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},
     capitalRequire(l::T,s::T,b::T,lambda::T,δ::T)::T = (1-params.α*params.wr)*(1-lambda)*l + s - b - (1-params.g)*δ # bank fails if negative
 
     # Interpolate qBond for a given value of choice (l,s,b) and state (delta, lambda)
-    function qBond_interpolated(l::T, s::T, b::T, deltaInd::S, lambdaInd::S, params::Params{T,S}, vFuncs::VFuncs{T,S})::T
+    function qBond_interpolated(l::T, s::T, b::T, deltaInd::SS, lambdaInd::SS, params::Params{T,SS}, vFuncs::VFuncs{T,SS})::T
 
         lRange = range(first(params.lGrid), last(params.lGrid), length(params.lGrid));
         sRange = range(first(params.sGrid), last(params.sGrid), length(params.sGrid));
@@ -947,14 +947,13 @@ function Get_PolicyFuncs(params::Params{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},
                     end
                     EV_temp = params.H * VF_temp
                     govSpend_bailout_temp = [max(VLB_temp[iLambdaPrime] - bHat_temp[iLambdaPrime], 0) - EV_temp[iLambdaPrime] for iLambdaPrime in 1:length(params.lambdaGrid)];
-                    policy.govSpend_bailout[iDelta, iLambda, iN, :] .= [policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? govSpend_bailout_temp[iLambdaPrime] : 0.0 for iLambdaPrime in 1:length(params.lambdaGrid)];
+                    policy.govSpend_bailout[iDelta, iLambda, iN, :] .= ( policy.failure[iDelta, iLambda, iN, :] .== 1 ) .* vec(govSpend_bailout_temp);
 
                   #  policy.govSpend_bailout[iDelta, iLambda, iN, :] = sum([policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? max(0, (1 - params.cF) * (Rl * ((1 - params.lambdaGrid[iLambdaPrime]) * iterobj.solution[iN][1] + params.g * params.deltaGrid[iDelta]) + (1 + params.Rf) * iterobj.solution[iN][2]) - params.deltaGrid[iDelta] - params.α * params.wr * Rl * (1 - params.lambdaGrid[iLambdaPrime]) * iterobj.solution[iN][1]) : 0 for iLambdaPrime in 1:length(params.lambdaGrid)]); # government spending for bank bailout
                 else # benchmark regime 
                     govSpend_bailout_temp = [(1- params.ρ_bailout)*[params.deltaGrid[iDelta] + iterobj.solution[iN][3] - Rl * (1-params.α*params.wr)* (1-lambdaPrime)*iterobj.solution[iN][1] + params.g*params.deltaGrid[iDelta] - (1+params.Rf)*iterobj.solution[iN][2]] for lambdaPrime in params.lambdaGrid];
-                    policy.govSpend_bailout[iDelta, iLambda, iN, :] .= [policy.failure[iDelta, iLambda, iN, iLambdaPrime] == 1 ? govSpend_bailout_temp[iLambdaPrime] : 0.0 for iLambdaPrime in 1:length(params.lambdaGrid)];
+                    policy.govSpend_bailout[iDelta, iLambda, iN, :] .= ( policy.failure[iDelta, iLambda, iN, :] .== 1 ) .* vec(govSpend_bailout_temp);
                 end
-                
             end
         end
     end

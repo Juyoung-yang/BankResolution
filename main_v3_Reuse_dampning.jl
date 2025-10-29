@@ -23,7 +23,7 @@ function solve_simulate_and_moments_reuse(params::Params{T,S},params_cal::Params
     stationary_distribution!(params, Rl_star, vFuncs, vFuncsNew, Iterobj_is, 1000, 1e-4)
 
     # --- 5️⃣ Continue to policy and simulation using the already solved state ---
-    policy = Get_PolicyFuncs(params, Iterobj_is, vFuncs, Rl_star)
+    policy = Get_PolicyFuncs(params, Iterobj_is, vFuncs, Rl_star, regime)
     println("<<<<<<Obtained policy functions>>>>>>")
 
     simulation = simulate_and_moments(params, params_cal, vFuncs, policy, Rl_star, regime)
@@ -44,7 +44,7 @@ function solve_model_given_r!(Rl::T;Params::Params{T,S},Regime::F,vFuncs::VFuncs
     VFI!(Params, vFuncs, vFuncsNew, Iterobj_is, Rl, Regime, 500, 1e-2)
 
     println("(SUB BLOCK) -- stationary_distribution! (reuse enabled)")
-    stationary_distribution!(Params, Rl, vFuncs, vFuncsNew, Iterobj_is, 500, 1e-4)
+    stationary_distribution!(Params, Rl, vFuncs, vFuncsNew, Iterobj_is, 500, 1e-2)
 
     excess_loan_supply = aggre_loan_supply(Params, vFuncs, Iterobj_is) - Rl^(Params.ϵ) * Params.E
     return excess_loan_supply
