@@ -25,7 +25,6 @@ struct Params{T<:Real,S<:Integer}
         dBar::T
         σ::T
         τC::T
-        z::T
         δL::T
         δM::T
         δH::T
@@ -42,8 +41,6 @@ struct Params{T<:Real,S<:Integer}
         λL::T
         λM::T
         λH::T
-        γ::T
-        ϕ::T
 
         sigHat::T ## curvature for div, especially for stock issuance 
         lconstr::T ## deposit to loan constraint
@@ -101,7 +98,7 @@ struct IterObj_i{T<:Real,S<:Integer} # objects given state (iDelta, iLambda), ob
         failure::Array{Array{T,1},1} # failure decision = [(fail or not fail vector for each lambda prime) for each n]
 end
 
-function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,z::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,ϵ::T,E::T,H::Array{T,2},F::Array{T,2},M::T,λL::T,λM::T,λH::T,γ::T,ϕ::T,sigHat::T,lconstr::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
+function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dBar::T,σ::T,τC::T,δL::T,δM::T,δH::T,cM::T,cO::T,cL::T,ϵ::T,E::T,H::Array{T,2},F::Array{T,2},M::T,λL::T,λM::T,λH::T,sigHat::T,lconstr::T,n_start::T,n_npts::S,n_stop::T,l_start::T,l_npts::S,l_stop::T,s_start::T,s_npts::S,s_stop::T,b_start::T,b_npts::S,b_stop::T) where {T<:Real,S<:Integer}
         deltaGrid = [δL,δM,δH] # Define a Tuple, immutable 
         lambdaGrid = [λL,λM,λH] # regular array, mutable
         nGrid = range(n_start,stop=n_stop,length=n_npts)
@@ -110,7 +107,7 @@ function Initiate_Params(qd::T,β::T,Rf::T,wr::T,α::T,ρ::T,g::T,ξ::T,cF::T,dB
         sGrid = range(s_start,stop=s_stop,length=s_npts)
         bGrid = range(b_start,stop=b_stop,length=b_npts)
     
-        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,γ,ϕ,sigHat,lconstr,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
+        pam = Params{T,S}(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,sigHat,lconstr,deltaGrid,lambdaGrid,nGrid,lGrid,sGrid,bGrid)
         return pam
 end
 

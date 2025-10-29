@@ -32,6 +32,8 @@ function solve_simulate_and_moments_reuse(params::Params{T,S},params_cal::Params
     return (moments = simulation.moments,
             Rl_star = Rl_star,
             vFuncs = vFuncs,
+            vFuncsNew = vFuncsNew,
+            Iterobj_is = Iterobj_is,
             policy = policy,
             paths = simulation.paths)
 end
@@ -52,9 +54,18 @@ function VFI!(params::Params{T,S},vFuncs::VFuncs{T,S},vFuncsNew::VFuncsNew{T,S},
 
         iter, maxdiffs, diffs = 1, one(T), zeros(T);
 
-        if iter == 1
-            println("VFI 시작 시 VF 평균값: ", mean(vFuncs.VF))
+        βF = nothing
+        fail_temp_buffer = nothing
+        q_temp_buffer = nothing
+
+        if regime == true
+            βF = params.β .* params.F                     # 1회 계산
+            nthreads = Threads.nthreads()
+            fail_temp_buffer = [Vector{T}(undef, 3) for _ in 1:nthreads]
+            q_temp_buffer = [Vector{T}(undef, 3) for _ in 1:nthreads]
         end
+
+        println("VFI 시작 시 VF 평균값: ", mean(vFuncs.VF))
 
         # start the iteration
         while iter <= maxiter && maxdiffs > tol
@@ -68,18 +79,16 @@ function VFI!(params::Params{T,S},vFuncs::VFuncs{T,S},vFuncsNew::VFuncsNew{T,S},
             if regime == false # ordinary regime
                 vFuncsNew.qBond .= params.β; # bank bond is risk-free 
             else # special regime
-                qBond_specialRegime(params,vFuncsNew,Rl) # set qBond to be 1 for all states 
+                qBond_specialRegime!(params,vFuncsNew,Rl,βF,fail_temp_buffer,q_temp_buffer) # set qBond to be 1 for all states 
             end
 
             # 감쇠(damping) 업데이트로 진동 억제
-            damping = 0.3;
-            @. vFuncs.VF = (1 - damping) * vFuncs.VF + damping * vFuncsNew.VF
-            @. vFuncs.qBond = (1 - damping) * vFuncs.qBond + damping * vFuncsNew.qBond
-            @. vFuncs.X = (1 - damping) * vFuncs.X + damping * vFuncsNew.X
+            @. vFuncs.VF = 0.7 * vFuncs.VF + 0.3 * vFuncsNew.VF
+            @. vFuncs.qBond = 0.7 * vFuncs.qBond + 0.3 * vFuncsNew.qBond
+            @. vFuncs.X = 0.7 * vFuncs.X + 0.3 * vFuncsNew.X
 
             # 수렴도 계산
-            diffs = abs.(vFuncs.VF .- vFuncsNew.VF)
-            maxdiffs = maximum(diffs)
+            maxdiffs = maximum(abs.(vFuncs.VF .- vFuncsNew.VF))
 
             if mod(iter, 100) == 0
                 println("VFI!: iter=$iter, maxdiffs=$maxdiffs")
@@ -91,6 +100,72 @@ function VFI!(params::Params{T,S},vFuncs::VFuncs{T,S},vFuncsNew::VFuncsNew{T,S},
     println("VFI! 종료 시 VF 평균값: ", mean(vFuncs.VF))
     return nothing
 end
+
+# debt pricing in counterfactural regime
+function qBond_condiState!(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDelta::S,fail_temp::Vector{T},q_temp::Vector{T},βF::AbstractMatrix{T}) where {T<:Real,S<:Integer} 
+        
+        l, s, b, Delta = params.lGrid[il], params.sGrid[is], params.bGrid[ib], params.deltaGrid[iDelta]
+        # lambdaStar(l,s,b,Delta) = (Rl*(l+params.g*Delta)+(1+params.Rf)*s-Delta-b)/(Rl*l)
+        lambdaStar_capital(l,s,b,Delta) = 1- (-s + b + (1-params.g)*Delta)/(1-params.α * params.wr)/l
+        λStar = clamp( lambdaStar_capital(l,s,b,Delta), 0.0, 1.0) ; # lambda cutoff λStar in [0,1]
+
+        
+        # --- 3️⃣ 실패시 수익률 계산 (fail_temp에 in-place 저장) ---
+        if b == eps()
+            fill!(fail_temp, zero(T)) # 대출이 없으면 fail과 상관없이 loan profit이 없음 
+        else
+            @inbounds for j in 1:3
+                Λ = params.lambdaGrid[j]
+                NetAsset = Rl * ((one(T) - Λ) * l + params.g * Delta) + (one(T) + params.Rf) * s - Delta 
+                hi   = max(zero(T), NetAsset)
+                VLB = min(b, hi)
+                bHat = NetAsset - params.α * params.wr * Rl * (one(T) - Λ) * l
+                num = max(VLB, bHat)
+                fail_temp[j] = num / b
+            end
+        end
+
+        # --- 4️⃣ λ* 위치에 따라 q_temp 구성 (Nλ=3 기준), 기본적으로 lambda가 커야 은행 실패 ---
+        @inbounds begin
+            if λStar < params.λL # fail all the time  
+               @. q_temp = fail_temp
+            elseif λStar < params.λM
+                q_temp[1] = one(T) # no fail when lambda is the lowest
+                q_temp[2] = fail_temp[2]
+                q_temp[3] = fail_temp[3]
+            elseif λStar < params.λH
+                q_temp[1] = one(T)
+                q_temp[2] = one(T)
+                q_temp[3] = fail_temp[3]
+            else # failure at all time
+                fill!(q_temp, one(T))
+            end
+        end
+
+        # --- 5️⃣ βF * q_temp  (in-place 덮어쓰기) ---
+        rhs = copy(q_temp)
+        mul!(q_temp, βF, rhs)
+end
+
+function qBond_specialRegime!(params::Params{T,S},vFuncsNew::VFuncsNew{T,S},Rl::T,βF::AbstractMatrix{T},fail_temp_buffer::Vector{Vector{T}},q_temp_buffer::Vector{Vector{T}}) where {T<:Real,S<:Integer}
+
+        Threads.@threads for il in eachindex(params.lGrid)
+            tid = Threads.threadid()
+            fail_temp = fail_temp_buffer[tid]
+            q_temp = q_temp_buffer[tid]
+
+            for is in eachindex(params.sGrid)
+                for ib in eachindex(params.bGrid)
+                    for iDelta in eachindex(params.deltaGrid)
+                         qBond_condiState!(params,Rl,il,is,ib,iDelta,fail_temp,q_temp,βF)
+                        @views @. vFuncsNew.qBond[il,is,ib,iDelta,:] = 0.7 * vFuncsNew.qBond[il,is,ib,iDelta,:] + 0.3 * q_temp
+                    end
+                end
+            end
+        end
+    return nothing
+end
+
 
 function stationary_distribution!(params::Params{T,S},Rl::T,vFuncs::VFuncs{T,S},vFuncsNew::VFuncsNew{T,S},Iterobj_is::Matrix{IterObj_i{T,S}},maxiter::S,tol::T) where {T<:Real,S<:Integer}
 
