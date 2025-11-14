@@ -13,18 +13,18 @@ b = 2.0-eps()
 # for root finding with initial guess 
 a = 1.04+eps()
 
-# target moment 
-debt_to_liability = 0.122136
-loan_to_asset = 0.713694
-capital_to_deposit = 0.0913644
-loan_rate = 1.0473  ## 2024년 기준
+sigHat = 1.15
+lconstr = 2.4
+E = 210.0
 
-# initial guess for calibrated parameters
-cM = 1.3e-5
-cO = 0.2
-cL = 0.1 # let operation cost for deposit being very small; 
-# cL originally 0.5; with 0.5, optimization does not converge
-ϵ = - 1.1 # (KEEP IT FIXED) loan demand elasticity, - 1.1 for April 
-E = 200.0 # loan demand shifter
-dBar = 1.0
-σ = 0.9932 # (KEEP IT FIXED) 
+
+# under 최종 parameter: sigHat = 1.15/ lconstr = 2.4/ E = 210.0 with cL = -0.005
+# target moment: need to have 5 moments; 3 for balance sheet rated, loan interest rate, relative size of dividend 
+debt_to_liability = 0.122136 ## 2000년 ~ 2024년 은행간 연 평균 -------- model: 0.45036739269891835
+loan_to_asset = 0.713694 ## 2000년 ~ 2024년 은행간 연 평균 -------- model: 0.6268244707025968
+capital_to_deposit = 0.0913644 ## 2000년 ~ 2024년 은행간 연 평균 --------- model: 0.2833193942901851
+loan_rate = 1.0473  ## 2024년 기준 ------- model: 1.0402875686320894
+dividend_to_deposit = .0035879 ## 2024년 기준 : 0.35% ------ model: -0.031056317896547517 (전체)/ 0.0553845549300786 (배당지급 하는 경우에만)
+## bank failure rate = 3.8% or 0.038 ------- model: 0.08379545454545455
+## 예대율 비율: ----- model : 1.3753338636637973
+

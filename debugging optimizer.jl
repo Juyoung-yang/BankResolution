@@ -1,10 +1,112 @@
 pwd()
 
-include("parameters.jl");
-include("main_v2_250922.jl");
-
+include("parameters_v4_final.jl");
+include("parameters_calib.jl");
+include("main_v2_noLoanConstraint_capitalRequirement.jl");
+include("main_v3_Reuse_dampning.jl");
 Random.seed!(5877);
-params = Initiate_Params(qd,β,Rf,wr,α,ρ,g,ξ,cF,dBar,σ,τC,z,α1,α2,α3,δL,δM,δH,cM,cO,cL,ϵ,H,F,M,λL,λM,λH,γ,ϕ,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+
+
+params_cal = Initiate_Params_cal(bigT,bigN,bigJ,trim,a,b,debt_to_liability,capital_to_deposit,loan_to_asset,loan_rate,cM,cO,cL,ϵ,E,dBar,σ);
+
+lconstr = 2.4;
+# E = 263.0; # E = 185.0;
+E = 210.0;
+sigHat = 1.15;
+params_ex = Initiate_Params(qd,β,q_delta,Rf,wr,α,ρ,ρ_bailout,g,ξ,cF,dBar,σ,τC,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,sigHat,lconstr,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+@show params_ex.lconstr, params_ex.sigHat, params_ex.E
+
+vFuncs_false       = Initiate_vFunc(params_ex);
+vFuncsNew_false    = Initiate_vFuncNew(params_ex);
+Iterobj_is_false   = Initiate_MatrixIterObj_i(params_ex);
+
+solve_model_given_r_single_false = Rl -> solve_model_given_r!(Rl;Params = params_ex,Regime = false,vFuncs = vFuncs_false,vFuncsNew = vFuncsNew_false,Iterobj_is = Iterobj_is_false)
+Rl_safe = clamp(params_cal.a, 1.0 + eps(), 2.0 - eps())
+@time Rl_star_false = find_zero(solve_model_given_r_single_false,Rl_safe,method = Roots.Secant();tol = 1e-2,maxevals = 100)
+
+VFI!(params_ex, vFuncs_false, vFuncsNew_false, Iterobj_is_false, Rl_star_false, false, 1000, 1e-4)
+stationary_distribution!(params_ex, Rl_star_false, vFuncs_false, vFuncsNew_false, Iterobj_is_false, 2000, 1e-4)
+
+
+
+vFuncs_true       = Initiate_vFunc(params_ex);
+vFuncsNew_true    = Initiate_vFuncNew(params_ex);
+Iterobj_is_true   = Initiate_MatrixIterObj_i(params_ex);
+
+solve_model_given_r_single_true = Rl -> solve_model_given_r!(Rl;Params = params_ex,Regime = true,vFuncs = vFuncs_false,vFuncsNew = vFuncsNew_false,Iterobj_is = Iterobj_is_false)
+Rl_safe = clamp(params_cal.a, 1.0 + eps(), 2.0 - eps())
+@time Rl_star_false = find_zero(solve_model_given_r_single_true,Rl_safe,method = Roots.Secant();tol = 1e-2,maxevals = 2)
+
+VFI!(params_ex, vFuncs_false, vFuncsNew_false, Iterobj_is_false, Rl_star_false, false, 1000, 1e-4)
+stationary_distribution!(params_ex, Rl_star_false, vFuncs_false, vFuncsNew_false, Iterobj_is_false, 2000, 1e-4)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+sum(vFuncs_false.Γ)
+sum(vFuncs_false.Γ[:,,:])
+
+fail_temp_buffer = [Vector(undef, 3) for _ in 1:5]  
+length(fail_temp_buffer)
+length(params_ex.lGrid)
+fail_temp_buffer[1]
+fill!(fail_temp_buffer[1], 0.0)
+A = fail_temp_buffer[1]
+
+A = params_ex.β * params_ex.F
+qBond_condiState!(params_ex, 1.1, 1,1,1,1,fail_temp_buffer[1],fail_temp_buffer[1],A)
+
+βF = params_ex.β .* params_ex.F                     
+fail_temp_buffer = [Vector(undef, 3) for _ in 1:5]
+q_temp_buffer = [Vector(undef, 3) for _ in 1:5]
+
+qBond_specialRegime!(params_ex,vFuncsNew_false,Rl_safe,βF,fail_temp_buffer,q_temp_buffer) # set qBond to be 1 for all states 
+vFuncsNew_false.qBond
+
+
+
+
+
+params = Initiate_Params(qd,β,Rf,wr,α,ρ,ρ_bailout,g,ξ,cF,dBar,σ,τC,δL,δM,δH,cM,cO,cL,ϵ,E,H,F,M,λL,λM,λH,sigHat,lconstr,n_start,n_npts,n_stop,l_start,l_npts,l_stop,s_start,s_npts,s_stop,b_start,b_npts,b_stop)
+
+Update_stationary_dist(params_ex, vFuncs_false, vFuncsNew_false, Iterobj_is_false, 1,1,1,1,Rl_safe)
+
+iDelta = 1
+iLambda = 2
+Iterobj_is_false[iDelta, iLambda].failure[1]
+iLambdaPrime = 1
+params.lGrid[iLambdaPrime]
+Iterobj_is_false[iDelta, iLambda].solution[1]
+Iterobj_is_false[iDelta, iLambda].solution_index
+
+@show vFuncsNew_false.Γ[:, iLambdaPrime, 1]
+@show params.H[iDelta, :]
+nPrime = 53.0
+searchsortedlast(params.nGrid, nPrime)
+params.nGrid
+searchsortedlast(params.nGrid, nPrime)
+ searchsortedfirst(params.nGrid, nPrime)
+
+
+
+
+
+
 
 startt = 1.0+eps();
 endd = 2.0-eps();

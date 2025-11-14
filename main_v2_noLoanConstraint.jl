@@ -1100,6 +1100,7 @@ function calculate_series(paths::SimPaths{T,S}, policy::PolicyFuncs{T,S}, vFuncs
     n_failure(l::T, lambda::T)::T = params.α * params.wr * Rl * (1-lambda)*l; # next period asset conditional on bank failure 
     govGuarantedSpending(lambda::T, δ::T)::T = Rl * (lambda + params.ξ) * params.g * δ; 
 
+    
     ### government spending for regime == true 
     # bHat_true(delta::T,lambda::T,l::T,s::T,b::T)::T =  # Rl*[(1-lambda)*l + params.g*delta] + (1+params.Rf)*s - delta; # when the bank survives, the amount of liability that needs to be bailed out by the government
     # vLenderB_true(delta::T,lambda::T,l::T,s::T,b::T)::T = 

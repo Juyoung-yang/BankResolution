@@ -60,9 +60,12 @@ function VFI!(params::Params{T,S},vFuncs::VFuncs{T,S},vFuncsNew::VFuncsNew{T,S},
 
         if regime == true
             βF = params.β .* params.F                     # 1회 계산
-            nthreads = Threads.nthreads()
-            fail_temp_buffer = [Vector{T}(undef, 3) for _ in 1:nthreads]
-            q_temp_buffer = [Vector{T}(undef, 3) for _ in 1:nthreads]
+           #  nthreads = Threads.nthreads()
+           # fail_temp_buffer = [Vector{T}(undef, 3) for _ in 1:nthreads]
+          #  @show size(fail_temp_buffer)
+          #  q_temp_buffer = [Vector{T}(undef, 3) for _ in 1:nthreads]
+          fail_temp_buffer = [Vector(undef, 3) for _ in 1:5]
+          q_temp_buffer = [Vector(undef, 3) for _ in 1:5]
         end
 
         println("VFI 시작 시 VF 평균값: ", mean(vFuncs.VF))
@@ -101,22 +104,22 @@ function VFI!(params::Params{T,S},vFuncs::VFuncs{T,S},vFuncsNew::VFuncsNew{T,S},
     return nothing
 end
 
-# debt pricing in counterfactural regime
-function qBond_condiState!(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDelta::S,fail_temp::Vector{T},q_temp::Vector{T},βF::AbstractMatrix{T}) where {T<:Real,S<:Integer} 
+# debt pricing inqBond_condiState! counterfactural regime
+function qBond_condiState!(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDelta::S,fail_temp::Vector,q_temp::Vector,βF::AbstractMatrix{T}) where {T<:Real,S<:Integer} 
         
         l, s, b, Delta = params.lGrid[il], params.sGrid[is], params.bGrid[ib], params.deltaGrid[iDelta]
         # lambdaStar(l,s,b,Delta) = (Rl*(l+params.g*Delta)+(1+params.Rf)*s-Delta-b)/(Rl*l)
         lambdaStar_capital(l,s,b,Delta) = 1- (-s + b + (1-params.g)*Delta)/(1-params.α * params.wr)/l
-        λStar = clamp( lambdaStar_capital(l,s,b,Delta), 0.0, 1.0) ; # lambda cutoff λStar in [0,1]
-
+        @show λStar = clamp( lambdaStar_capital(l,s,b,Delta), 0.0, 1.0) ; # lambda cutoff λStar in [0,1]
+       
         
         # --- 3️⃣ 실패시 수익률 계산 (fail_temp에 in-place 저장) ---
         if b == eps()
-            fill!(fail_temp, zero(T)) # 대출이 없으면 fail과 상관없이 loan profit이 없음 
+            fill!(fail_temp, 0.0) # 대출이 없으면 fail과 상관없이 loan profit이 없음 
         else
             @inbounds for j in 1:3
                 Λ = params.lambdaGrid[j]
-                NetAsset = Rl * ((one(T) - Λ) * l + params.g * Delta) + (one(T) + params.Rf) * s - Delta 
+                NetAsset = Rl * ((one(T) - Λ) * l + params.g * Delta) + (one(T) + params.Rf*0.8) * s - Delta 
                 hi   = max(zero(T), NetAsset)
                 VLB = min(b, hi)
                 bHat = NetAsset - params.α * params.wr * Rl * (one(T) - Λ) * l
@@ -124,6 +127,7 @@ function qBond_condiState!(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDel
                 fail_temp[j] = num / b
             end
         end
+        @show fail_temp
 
         # --- 4️⃣ λ* 위치에 따라 q_temp 구성 (Nλ=3 기준), 기본적으로 lambda가 커야 은행 실패 ---
         @inbounds begin
@@ -147,23 +151,23 @@ function qBond_condiState!(params::Params{T,S}, Rl::T, il::S ,is::S, ib::S, iDel
         mul!(q_temp, βF, rhs)
 end
 
-function qBond_specialRegime!(params::Params{T,S},vFuncsNew::VFuncsNew{T,S},Rl::T,βF::AbstractMatrix{T},fail_temp_buffer::Vector{Vector{T}},q_temp_buffer::Vector{Vector{T}}) where {T<:Real,S<:Integer}
+function qBond_specialRegime!(params::Params{T,S},vFuncsNew::VFuncsNew{T,S},Rl::T,βF::AbstractMatrix{T},fail_temp_buffer::Vector,q_temp_buffer::Vector) where {T<:Real,S<:Integer}
 
-        Threads.@threads for il in eachindex(params.lGrid)
-            tid = Threads.threadid()
-            fail_temp = fail_temp_buffer[tid]
-            q_temp = q_temp_buffer[tid]
+  Threads.@threads for il in 1:length(params.lGrid)
+   #  for il in length(params.lGrid)
+           #  tid = Threads.threadid()
+             fail_temp = fail_temp_buffer[il]
+             q_temp = q_temp_buffer[il]
 
-            for is in eachindex(params.sGrid)
-                for ib in eachindex(params.bGrid)
-                    for iDelta in eachindex(params.deltaGrid)
-                         qBond_condiState!(params,Rl,il,is,ib,iDelta,fail_temp,q_temp,βF)
-                        @views @. vFuncsNew.qBond[il,is,ib,iDelta,:] = 0.7 * vFuncsNew.qBond[il,is,ib,iDelta,:] + 0.3 * q_temp
+            for is in 1:length(params.sGrid)
+                for ib in 1:length(params.bGrid)
+                    for iDelta in 1:length(params.deltaGrid)
+                        qBond_condiState!(params,Rl,il,is,ib,iDelta,fail_temp,q_temp,βF)
+                        @. vFuncsNew.qBond[il,is,ib,iDelta,:] = 0.7 * vFuncsNew.qBond[il,is,ib,iDelta,:] + 0.3 * q_temp
                     end
                 end
             end
         end
-    return nothing
 end
 
 
@@ -186,8 +190,9 @@ function stationary_distribution!(params::Params{T,S},Rl::T,vFuncs::VFuncs{T,S},
         fill!(vFuncsNew.Γ, 0.0)
 
         # (1) 한 층만 thread 병렬화
-        Threads.@threads for iΔ in 1:nΔ
-            for iΛ in 1:nΛ, iN in 1:nN, iΛp in 1:nΛ
+        Threads.@threads for iΛp in 1:nΛ 
+      #   for iΔ in 1:nΔ
+            for iΛ in 1:nΛ, iN in 1:nN, iΔ in 1:nΔ
                 Update_stationary_dist(params, vFuncs, vFuncsNew,Iterobj_is, iΔ, iΛ, iN, iΛp, Rl)
             end
         end
